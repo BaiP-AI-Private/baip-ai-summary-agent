@@ -81,10 +81,6 @@ From your Twitter Developer Dashboard:
 | `TWITTER_ACCESS_SECRET` | Your Twitter Access Secret   |
 | `TWITTER_BEARER_TOKEN`  | Your Twitter Bearer Token    |
 
-Make sure you already have these secrets set up:
-- `OPENAI_API_KEY` - Your OpenAI API Key
-- `SLACK_WEBHOOK_URL` - Your Slack Webhook URL
-
 ### Step 4: Ensure API Permissions
 In your Twitter Developer Portal app settings, make sure you have:
 1. Read access to tweets
