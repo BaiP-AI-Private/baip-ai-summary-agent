@@ -18,15 +18,20 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install dependencies
+    - name: Install dependencies and fix SSL issues
       run: |
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements.txt || true  # fallback in case file doesn't exist
         pip install certifi
+        export SSL_CERT_FILE=$(python -m certifi)
+        echo "SSL_CERT_FILE=$(python -m certifi)" >> $GITHUB_ENV
 
     - name: Run scraper / summary generator
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        SSL_CERT_FILE: ${{ env.SSL_CERT_FILE }}
       run: |
         python ai_summary_agent.py
