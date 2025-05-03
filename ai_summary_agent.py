@@ -1,8 +1,7 @@
 import os
-import subprocess
 import json
 import openai
-import ssl
+import tweepy
 import certifi
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -26,59 +25,65 @@ TWEET_LIMIT = 100  # Max tweets to fetch per account
 # === UTILITIES ===
 
 def validate_env():
-    if not openai.api_key:
-        raise EnvironmentError("Missing OPENAI_API_KEY in environment.")
-    if not os.getenv("SLACK_WEBHOOK_URL"):
-        raise EnvironmentError("Missing SLACK_WEBHOOK_URL in environment.")
+    required_vars = ["OPENAI_API_KEY", "SLACK_WEBHOOK_URL", 
+                     "TWITTER_API_KEY", "TWITTER_API_SECRET", 
+                     "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET",
+                     "TWITTER_BEARER_TOKEN"]
+    
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise EnvironmentError(f"Missing environment variables: {', '.join(missing)}")
 
 def get_yesterday_date_range():
     yesterday = datetime.utcnow() - timedelta(days=1)
     start = yesterday.replace(hour=0, minute=0, second=0)
     end = yesterday.replace(hour=23, minute=59, second=59)
-    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    # Format for Twitter API v2
+    return start.strftime("%Y-%m-%dT00:00:00Z"), end.strftime("%Y-%m-%dT23:59:59Z")
 
-def setup_ssl_context():
-    """Create a custom SSL context using certifi's certificates"""
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-    return ssl_context
+def setup_twitter_client():
+    """Create Twitter API v2 client"""
+    client = tweepy.Client(
+        bearer_token=os.getenv("TWITTER_BEARER_TOKEN"),
+        consumer_key=os.getenv("TWITTER_API_KEY"),
+        consumer_secret=os.getenv("TWITTER_API_SECRET"),
+        access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
+        access_token_secret=os.getenv("TWITTER_ACCESS_SECRET")
+    )
+    return client
 
-def scrape_tweets(account, start_date, end_date):
-    query = f"from:{account} since:{start_date} until:{end_date}"
-    print(f"Scraping: {query}")
+def fetch_tweets(client, account, start_time, end_time):
+    """Fetch tweets using Twitter API v2"""
+    print(f"Fetching tweets for {account} from {start_time} to {end_time}")
+    
     try:
-        # Set environment variable to use certifi's certificates
-        env = os.environ.copy()
-        env["REQUESTS_CA_BUNDLE"] = certifi.where()
-        env["SSL_CERT_FILE"] = certifi.where()
-        
-        # Pass the environment to the subprocess
-        result = subprocess.run(
-            ["snscrape", "--jsonl", "--max-results", str(TWEET_LIMIT), 
-             "--with-entity", "twitter-search", query],
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env
-        )
-        tweets = [json.loads(line) for line in result.stdout.splitlines()]
-        return [tweet["content"] for tweet in tweets]
-    except subprocess.CalledProcessError as e:
-        print(f"Error scraping tweets for {account}: {e.stderr}")
-        # Try with the --no-verify flag as a fallback
-        try:
-            result = subprocess.run(
-                ["snscrape", "--jsonl", "--max-results", str(TWEET_LIMIT), 
-                 "--with-entity", "--no-verify", "twitter-search", query],
-                capture_output=True,
-                text=True,
-                check=True,
-                env=env
-            )
-            tweets = [json.loads(line) for line in result.stdout.splitlines()]
-            return [tweet["content"] for tweet in tweets]
-        except subprocess.CalledProcessError as e2:
-            print(f"Fallback also failed for {account}: {e2.stderr}")
+        # First, get the user ID
+        user = client.get_user(username=account)
+        if not user.data:
+            print(f"Could not find user: {account}")
             return []
+        
+        user_id = user.data.id
+        
+        # Then get the user's tweets within the time range
+        tweets = client.get_users_tweets(
+            id=user_id,
+            start_time=start_time,
+            end_time=end_time,
+            max_results=TWEET_LIMIT,
+            tweet_fields=['created_at', 'text'],
+            exclude=['retweets', 'replies']
+        )
+        
+        if not tweets.data:
+            print(f"No tweets found for {account} in the specified time range")
+            return []
+        
+        return [tweet.text for tweet in tweets.data]
+    
+    except tweepy.TweepyException as e:
+        print(f"Error fetching tweets for {account}: {str(e)}")
+        return []
 
 def summarize_with_gpt(tweet_texts):
     if not tweet_texts:
@@ -116,7 +121,7 @@ def post_to_slack(summary_text):
     if response.status_code == 200:
         print("✅ Summary posted to Slack successfully.")
     else:
-        print(f"❌ Failed to post to Slack: {response.text}")
+        print(f"❌ Failed to post to Slack: {response.status_code}, {response.text}")
 
 # === MAIN ===
 
@@ -130,15 +135,27 @@ def main():
     # Print certificate path for debugging
     print(f"Using certificate path: {certifi.where()}")
     
-    start_date, end_date = get_yesterday_date_range()
+    start_time, end_time = get_yesterday_date_range()
+    print(f"Fetching tweets from {start_time} to {end_time}")
+    
+    # Initialize Twitter API client
+    twitter_client = setup_twitter_client()
+    
     all_tweets = []
-
     for account in AI_ACCOUNTS:
-        tweets = scrape_tweets(account, start_date, end_date)
-        all_tweets.extend(tweets)
+        tweets = fetch_tweets(twitter_client, account, start_time, end_time)
+        if tweets:
+            print(f"Found {len(tweets)} tweets for {account}")
+            all_tweets.extend(tweets)
+        else:
+            print(f"No tweets found for {account}")
 
-    print("\n🔍 Generating daily AI summary...\n")
-    summary = summarize_with_gpt(all_tweets)
+    if not all_tweets:
+        summary = "No tweets found from the monitored AI accounts in the last 24 hours."
+    else:
+        print(f"\n🔍 Generating daily AI summary from {len(all_tweets)} tweets...\n")
+        summary = summarize_with_gpt(all_tweets)
+    
     print(summary)
     post_to_slack(summary)
 
