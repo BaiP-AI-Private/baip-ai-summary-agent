@@ -25,5 +25,8 @@ jobs:
         pip install certifi
 
     - name: Run scraper / summary generator
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       run: |
-        python scrape.py  # or whatever script you're using
+        python ai_summary_agent.py
