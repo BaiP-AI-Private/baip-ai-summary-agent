@@ -2,6 +2,8 @@ import os
 import subprocess
 import json
 import openai
+import ssl
+import certifi
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import requests
@@ -35,21 +37,48 @@ def get_yesterday_date_range():
     end = yesterday.replace(hour=23, minute=59, second=59)
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
+def setup_ssl_context():
+    """Create a custom SSL context using certifi's certificates"""
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    return ssl_context
+
 def scrape_tweets(account, start_date, end_date):
     query = f"from:{account} since:{start_date} until:{end_date}"
     print(f"Scraping: {query}")
     try:
+        # Set environment variable to use certifi's certificates
+        env = os.environ.copy()
+        env["REQUESTS_CA_BUNDLE"] = certifi.where()
+        env["SSL_CERT_FILE"] = certifi.where()
+        
+        # Pass the environment to the subprocess
         result = subprocess.run(
-            ["snscrape", "--jsonl", "--max-results", str(TWEET_LIMIT), "twitter-search", query],
+            ["snscrape", "--jsonl", "--max-results", str(TWEET_LIMIT), 
+             "--with-entity", "twitter-search", query],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            env=env
         )
         tweets = [json.loads(line) for line in result.stdout.splitlines()]
         return [tweet["content"] for tweet in tweets]
     except subprocess.CalledProcessError as e:
         print(f"Error scraping tweets for {account}: {e.stderr}")
-        return []
+        # Try with the --no-verify flag as a fallback
+        try:
+            result = subprocess.run(
+                ["snscrape", "--jsonl", "--max-results", str(TWEET_LIMIT), 
+                 "--with-entity", "--no-verify", "twitter-search", query],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=env
+            )
+            tweets = [json.loads(line) for line in result.stdout.splitlines()]
+            return [tweet["content"] for tweet in tweets]
+        except subprocess.CalledProcessError as e2:
+            print(f"Fallback also failed for {account}: {e2.stderr}")
+            return []
 
 def summarize_with_gpt(tweet_texts):
     if not tweet_texts:
@@ -82,7 +111,8 @@ def post_to_slack(summary_text):
         "text": f"🧠 *Daily AI Summary*:\n\n{summary_text}"
     }
 
-    response = requests.post(webhook_url, json=payload)
+    # Use certifi for SSL certificate verification
+    response = requests.post(webhook_url, json=payload, verify=certifi.where())
     if response.status_code == 200:
         print("✅ Summary posted to Slack successfully.")
     else:
@@ -92,6 +122,14 @@ def post_to_slack(summary_text):
 
 def main():
     validate_env()
+    
+    # Set global SSL certificate environment variables
+    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+    
+    # Print certificate path for debugging
+    print(f"Using certificate path: {certifi.where()}")
+    
     start_date, end_date = get_yesterday_date_range()
     all_tweets = []
 
