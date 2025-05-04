@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import time
 import random
-import argparse
+import re
 
 # Load environment variables from .env
 load_dotenv()
@@ -22,7 +22,7 @@ AI_ACCOUNTS = [
     "MistralAI"
 ]
 
-TWEET_LIMIT = 10  # Max tweets to fetch per account
+TWEET_LIMIT = 10
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
@@ -45,7 +45,7 @@ def get_yesterday_date_range():
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 def get_twitter_auth_token():
-    """Authenticate with Twitter using username/password and return auth tokens"""
+    """Get authentication tokens using Twitter's guest flow"""
     session = requests.Session()
     session.headers.update({
         "User-Agent": random.choice(USER_AGENTS),
@@ -54,72 +54,33 @@ def get_twitter_auth_token():
         "Connection": "keep-alive",
     })
 
-    # Step 1: Get guest token (still needed for some endpoints)
+    # Get guest token
     try:
         guest_response = session.post(
             "https://api.twitter.com/1.1/guest/activate.json",
             verify=certifi.where()
         )
-        guest_token = guest_response.json().get("guest_token") if guest_response.status_code == 200 else None
-    except Exception as e:
-        print(f"Error getting guest token: {e}")
-        guest_token = None
-
-    # Step 2: Authenticate with username/password
-    auth_payload = {
-        "input_flow_data": {
-            "flow_context": {
-                "debug_overrides": {},
-                "start_location": {"location": "manual"}
-            }
-        },
-        "subtask_versions": {
-            "action_list": 2,
-            "alert_dialog": 1,
-            "app_download_cta": 1,
-            # ... include other subtask versions as needed
-        }
-    }
-
-    try:
-        # This is a simplified version - actual implementation would need to handle Twitter's multi-step auth flow
-        auth_response = session.post(
-            "https://api.twitter.com/1.1/onboarding/task.json",
-            json=auth_payload,
-            auth=(os.getenv("TWITTER_USERNAME"), os.getenv("TWITTER_PASSWORD")),
-            verify=certifi.where()
-        )
-        
-        if auth_response.status_code == 200:
-            auth_data = auth_response.json()
-            # Extract auth tokens from response (actual implementation would vary)
-            ct0 = session.cookies.get("ct0")
-            auth_token = session.cookies.get("auth_token")
+        if guest_response.status_code == 200:
+            guest_token = guest_response.json().get("guest_token")
             return {
                 "guest_token": guest_token,
-                "ct0": ct0,
-                "auth_token": auth_token,
                 "session": session
             }
-        else:
-            print(f"Authentication failed: {auth_response.status_code}")
-            return None
     except Exception as e:
-        print(f"Error during authentication: {e}")
-        return None
+        print(f"Error getting guest token: {e}")
+    
+    return None
 
 def fetch_user_id(username, auth_data):
-    """Fetch the user ID for a given username"""
+    """Fetch user ID using GraphQL API"""
     url = f"https://api.twitter.com/graphql/4S2ihIKfF3xhp-ENxvUAfQ/UserByScreenName?variables=%7B%22screen_name%22%3A%22{username}%22%2C%22withHighlightedLabel%22%3Atrue%7D"
     
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
         "x-guest-token": auth_data.get("guest_token"),
-        "x-csrf-token": auth_data.get("ct0"),
         "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "keep-alive",
     }
     
     try:
@@ -127,58 +88,35 @@ def fetch_user_id(username, auth_data):
         if response.status_code == 200:
             data = response.json()
             return data["data"]["user"]["rest_id"]
-        else:
-            print(f"Failed to get user ID for {username}: {response.status_code}")
-            return None
     except Exception as e:
         print(f"Error getting user ID for {username}: {e}")
-        return None
+    
+    return None
 
 def fetch_user_tweets(user_id, auth_data, start_date, end_date):
-    """Fetch tweets for a specific user ID within a date range"""
+    """Fetch tweets using Twitter's GraphQL API"""
     url = "https://api.twitter.com/graphql/zICd6x_warY0bzMRm-piIg/UserTweets"
     
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
         "x-guest-token": auth_data.get("guest_token"),
-        "x-csrf-token": auth_data.get("ct0"),
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "keep-alive",
     }
     
     variables = {
         "userId": user_id,
         "count": TWEET_LIMIT,
         "includePromotedContent": False,
-        "withQuickPromoteEligibilityTweetFields": False,
         "withVoice": True,
         "withV2Timeline": True,
     }
     
     features = {
-        "responsive_web_graphql_exclude_directive_enabled": True,
-        "verified_phone_label_enabled": False,
-        "creator_subscriptions_tweet_preview_api_enabled": True,
         "responsive_web_graphql_timeline_navigation_enabled": True,
         "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-        "c9s_tweet_anatomy_moderator_badge_enabled": True,
-        "tweetypie_unmention_optimization_enabled": True,
-        "responsive_web_edit_tweet_api_enabled": True,
-        "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
-        "view_counts_everywhere_api_enabled": True,
-        "longform_notetweets_consumption_enabled": True,
-        "responsive_web_twitter_article_tweet_consumption_enabled": True,
-        "tweet_awards_web_tipping_enabled": False,
-        "freedom_of_speech_not_reach_fetch_enabled": True,
-        "standardized_nudges_misinfo": True,
-        "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
-        "rweb_video_timestamps_enabled": True,
-        "longform_notetweets_rich_text_read_enabled": True,
-        "longform_notetweets_inline_media_enabled": True,
-        "responsive_web_enhance_cards_enabled": False,
+        "responsive_web_graphql_exclude_directive_enabled": True,
     }
     
     params = {
@@ -194,30 +132,23 @@ def fetch_user_tweets(user_id, auth_data, start_date, end_date):
             
             instructions = data.get("data", {}).get("user", {}).get("result", {}).get("timeline_v2", {}).get("timeline", {}).get("instructions", [])
             
-            entries = []
             for instruction in instructions:
                 if instruction.get("type") == "TimelineAddEntries":
-                    entries.extend(instruction.get("entries", []))
-            
-            for entry in entries:
-                if "tweet" in entry.get("content", {}).get("itemContent", {}).get("tweet_results", {}).get("result", {}):
-                    tweet = entry["content"]["itemContent"]["tweet_results"]["result"]["tweet"]
-                    
-                    tweet_date = datetime.strptime(tweet["created_at"], "%a %b %d %H:%M:%S %z %Y").strftime("%Y-%m-%d")
-                    if start_date <= tweet_date <= end_date:
-                        tweets.append(tweet["full_text"])
-            
+                    for entry in instruction.get("entries", []):
+                        if "tweet" in entry.get("content", {}).get("itemContent", {}).get("tweet_results", {}).get("result", {}):
+                            tweet = entry["content"]["itemContent"]["tweet_results"]["result"]["tweet"]
+                            tweet_date = datetime.strptime(tweet["created_at"], "%a %b %d %H:%M:%S %z %Y").strftime("%Y-%m-%d")
+                            if start_date <= tweet_date <= end_date:
+                                tweets.append(tweet["full_text"])
             return tweets
-        else:
-            print(f"Failed to fetch tweets: {response.status_code}")
-            return []
     except Exception as e:
         print(f"Error fetching tweets: {e}")
-        return []
+    
+    return []
 
 def scrape_tweets_for_account(account, auth_data, start_date, end_date):
-    """Scrape tweets for a specific account within a date range"""
-    print(f"Scraping tweets for {account} from {start_date} to {end_date}")
+    """Scrape tweets for a specific account"""
+    print(f"Scraping tweets for {account}")
     
     user_id = fetch_user_id(account, auth_data)
     if not user_id:
@@ -228,7 +159,6 @@ def scrape_tweets_for_account(account, auth_data, start_date, end_date):
     print(f"Found {len(tweets)} tweets for {account}")
     
     time.sleep(random.uniform(2, 5))
-    
     return tweets
 
 def summarize_with_gpt(tweet_texts):
@@ -236,18 +166,14 @@ def summarize_with_gpt(tweet_texts):
         return "No tweets to summarize for this period."
 
     joined_text = "\n\n".join(tweet_texts)
-
     if len(joined_text) > 10000:
         joined_text = joined_text[:10000] + "\n\n[Truncated due to length]"
 
-    prompt = f"""
-You are an AI assistant. Summarize the main announcements, product updates, or insights from the following tweets by AI companies.
-
-Tweets:
+    prompt = f"""Summarize the main announcements from these AI company tweets:
 {joined_text}
 
-Summary:
-"""
+Summary:"""
+    
     response = openai.ChatCompletion.create(
         model="gpt-4-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -263,28 +189,21 @@ def post_to_slack(summary_text):
 
     try:
         response = requests.post(webhook_url, json=payload, verify=certifi.where())
-        if response.status_code == 200:
-            print("✅ Summary posted to Slack successfully.")
-        else:
-            print(f"❌ Failed to post to Slack: {response.status_code}, {response.text}")
+        if response.status_code != 200:
+            print(f"Failed to post to Slack: {response.status_code}")
     except Exception as e:
-        print(f"❌ Error posting to Slack: {e}")
+        print(f"Error posting to Slack: {e}")
 
 def main():
     validate_env()
-    
     os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
-    os.environ["SSL_CERT_FILE"] = certifi.where()
     
-    print(f"Using certificate path: {certifi.where()}")
-    
-    # Authenticate with Twitter
     print("Authenticating with Twitter...")
     auth_data = get_twitter_auth_token()
     if not auth_data:
-        print("Failed to authenticate with Twitter")
+        print("Using guest mode only - some features may be limited")
         return
-    
+
     start_date, end_date = get_yesterday_date_range()
     print(f"Fetching tweets from {start_date} to {end_date}")
     
@@ -297,7 +216,7 @@ def main():
     if not all_tweets:
         summary = "No tweets found from the monitored AI accounts in the last 24 hours."
     else:
-        print(f"\n🔍 Generating daily AI summary from {len(all_tweets)} tweets...\n")
+        print(f"\nGenerating summary from {len(all_tweets)} tweets...")
         summary = summarize_with_gpt(all_tweets)
     
     print(summary)
