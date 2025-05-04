@@ -7,6 +7,11 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import time
 import random
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -26,141 +31,156 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 ]
 
-def validate_env():
-    required_vars = ["OPENAI_API_KEY", "SLACK_WEBHOOK_URL"]
-    missing = [var for var in required_vars if not os.getenv(var)]
-    if missing:
-        raise EnvironmentError(f"Missing environment variables: {', '.join(missing)}")
+TWITTER_AUTH_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 
-def get_yesterday_date_range():
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    start = yesterday.replace(hour=0, minute=0, second=0)
-    end = yesterday.replace(hour=23, minute=59, second=59)
-    return start, end
-
-def get_twitter_session():
-    """Create authenticated Twitter session with guest token"""
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Origin": "https://twitter.com",
-        "Referer": "https://twitter.com/",
-    })
-
-    # Get guest token
-    try:
-        response = session.post(
-            "https://api.twitter.com/1.1/guest/activate.json",
-            headers={"Authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"},
-            verify=certifi.where()
-        )
-        if response.status_code == 200:
-            guest_token = response.json().get("guest_token")
-            session.headers.update({
-                "x-guest-token": guest_token,
-                "Authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
-            })
-            return session
-    except Exception as e:
-        print(f"Error getting guest token: {e}")
-    return None
-
-def get_user_id(session, username):
-    """Get user ID from screen name"""
-    params = {
-        "variables": json.dumps({"screen_name": username, "withHighlightedLabel": True})
-    }
-    try:
-        response = session.get(
-            "https://twitter.com/i/api/graphql/4S2ihIKfF3xhp-ENxvUAfQ/UserByScreenName",
-            params=params,
-            verify=certifi.where()
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("data", {}).get("user", {}).get("rest_id")
-    except Exception as e:
-        print(f"Error getting user ID for {username}: {e}")
-    return None
-
-def get_user_tweets(session, user_id, start_date, end_date, limit=10):
-    """Fetch user tweets within date range"""
-    variables = {
-        "userId": user_id,
-        "count": limit,
-        "includePromotedContent": False,
-        "withQuickPromoteEligibilityTweetFields": False,
-        "withVoice": True,
-        "withV2Timeline": True
-    }
-    
-    features = {
-        "responsive_web_graphql_timeline_navigation_enabled": True,
-        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-        "responsive_web_graphql_exclude_directive_enabled": True
-    }
-    
-    params = {
-        "variables": json.dumps(variables),
-        "features": json.dumps(features)
-    }
-    
-    try:
-        response = session.get(
-            "https://twitter.com/i/api/graphql/zICd6x_warY0bzMRm-piIg/UserTweets",
-            params=params,
-            verify=certifi.where()
-        )
+class TwitterScraper:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.verify = certifi.where()
+        self.setup_session()
         
-        if response.status_code == 200:
-            tweets = []
-            data = response.json()
-            instructions = data.get("data", {}).get("user", {}).get("result", {}).get("timeline_v2", {}).get("timeline", {}).get("instructions", [])
+    def setup_session(self):
+        """Initialize session with headers and authentication"""
+        self.session.headers.update({
+            "User-Agent": random.choice(USER_AGENTS),
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Origin": "https://twitter.com",
+            "Referer": "https://twitter.com/",
+            "Authorization": f"Bearer {TWITTER_AUTH_TOKEN}",
+        })
+        self.activate_guest_token()
+        
+    def activate_guest_token(self):
+        """Get and set guest token for session"""
+        try:
+            response = self.session.post("https://api.twitter.com/1.1/guest/activate.json")
+            if response.status_code == 200:
+                guest_token = response.json().get("guest_token")
+                self.session.headers.update({"x-guest-token": guest_token})
+                logger.info("Successfully obtained guest token")
+                return True
+        except Exception as e:
+            logger.error(f"Error getting guest token: {e}")
+        return False
+    
+    def get_user_id(self, username):
+        """Get Twitter user ID from username"""
+        params = {
+            "variables": json.dumps({"screen_name": username, "withHighlightedLabel": True})
+        }
+        try:
+            response = self.session.get(
+                "https://twitter.com/i/api/graphql/4S2ihIKfF3xhp-ENxvUAfQ/UserByScreenName",
+                params=params
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("data", {}).get("user", {}).get("rest_id")
+        except Exception as e:
+            logger.error(f"Error getting user ID for {username}: {e}")
+        return None
+    
+    def get_user_tweets(self, user_id, start_date, end_date, limit=10):
+        """Fetch user tweets within date range"""
+        variables = {
+            "userId": user_id,
+            "count": limit,
+            "includePromotedContent": False,
+            "withVoice": True,
+            "withV2Timeline": True
+        }
+        
+        features = {
+            "responsive_web_graphql_timeline_navigation_enabled": True,
+            "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+        }
+        
+        params = {
+            "variables": json.dumps(variables),
+            "features": json.dumps(features)
+        }
+        
+        try:
+            response = self.session.get(
+                "https://twitter.com/i/api/graphql/zICd6x_warY0bzMRm-piIg/UserTweets",
+                params=params
+            )
             
-            for instruction in instructions:
-                if instruction.get("type") == "TimelineAddEntries":
-                    for entry in instruction.get("entries", []):
-                        content = entry.get("content", {})
-                        if "itemContent" in content and "tweet_results" in content["itemContent"]:
-                            tweet = content["itemContent"]["tweet_results"].get("result", {})
-                            if "legacy" in tweet:
+            if response.status_code == 200:
+                return self.parse_tweets(response.json(), start_date, end_date)
+        except Exception as e:
+            logger.error(f"Error fetching tweets: {e}")
+        return []
+    
+    def parse_tweets(self, data, start_date, end_date):
+        """Parse tweets from API response"""
+        tweets = []
+        instructions = data.get("data", {}).get("user", {}).get("result", {}).get("timeline_v2", {}).get("timeline", {}).get("instructions", [])
+        
+        for instruction in instructions:
+            if instruction.get("type") == "TimelineAddEntries":
+                for entry in instruction.get("entries", []):
+                    content = entry.get("content", {})
+                    if "itemContent" in content and "tweet_results" in content["itemContent"]:
+                        tweet = content["itemContent"]["tweet_results"].get("result", {})
+                        if "legacy" in tweet:
+                            try:
                                 tweet_date = datetime.strptime(tweet["legacy"]["created_at"], "%a %b %d %H:%M:%S %z %Y")
                                 if start_date <= tweet_date <= end_date:
                                     tweets.append(tweet["legacy"]["full_text"])
-            return tweets
-    except Exception as e:
-        print(f"Error fetching tweets: {e}")
-    return []
+                            except Exception as e:
+                                logger.error(f"Error parsing tweet date: {e}")
+        return tweets
 
-def summarize_tweets(tweets):
+def get_date_range():
+    """Get yesterday's date range in UTC"""
+    yesterday = datetime.utcnow() - timedelta(days=1)
+    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0)
+    return start, end
+
+def generate_summary(tweets):
+    """Generate summary using OpenAI"""
     if not tweets:
         return "No tweets found from monitored accounts in the last 24 hours."
     
     text = "\n\n".join(tweets[:20])  # Limit to first 20 tweets
-    prompt = f"""Summarize the key points from these AI company tweets:
+    prompt = """Analyze these tweets from AI companies and create a concise daily summary:
     
-{text}
+Key points to extract:
+- New product announcements
+- Technical breakthroughs
+- Important partnerships
+- Notable research findings
+- Significant company updates
 
-Summary should highlight important announcements, product updates, and insights in bullet points:"""
+Tweets:
+{}
+
+Summary (in bullet points):""".format(text)
     
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=500
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"Error generating summary: {e}")
+        logger.error(f"Error generating summary: {e}")
         return "Failed to generate summary"
 
-def post_to_slack(message):
+def send_to_slack(message):
+    """Send summary to Slack"""
     webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        logger.error("SLACK_WEBHOOK_URL not set")
+        return False
+    
     payload = {
-        "text": f"🧠 *Daily AI Summary* 🧠\n\n{message}",
+        "text": f"*📰 Daily AI Summary - {datetime.utcnow().strftime('%Y-%m-%d')}*\n\n{message}",
         "mrkdwn": True
     }
     
@@ -171,46 +191,55 @@ def post_to_slack(message):
             headers={"Content-Type": "application/json"},
             verify=certifi.where()
         )
-        if response.status_code != 200:
-            print(f"Slack API error: {response.status_code} - {response.text}")
+        if response.status_code == 200:
+            logger.info("Successfully posted to Slack")
+            return True
+        logger.error(f"Slack API error: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"Error posting to Slack: {e}")
+        logger.error(f"Error posting to Slack: {e}")
+    return False
 
 def main():
-    validate_env()
-    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
-    
-    print("Initializing Twitter session...")
-    session = get_twitter_session()
-    if not session:
-        print("Failed to initialize Twitter session")
-        post_to_slack("⚠️ Failed to initialize Twitter session for daily summary")
+    """Main execution flow"""
+    # Validate environment variables
+    required_vars = ["OPENAI_API_KEY", "SLACK_WEBHOOK_URL"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        logger.error(f"Missing environment variables: {', '.join(missing)}")
         return
     
-    start_date, end_date = get_yesterday_date_range()
-    print(f"Fetching tweets from {start_date.date()} to {end_date.date()}")
+    # Initialize scraper
+    scraper = TwitterScraper()
+    if not scraper.session.headers.get("x-guest-token"):
+        logger.error("Failed to initialize Twitter session")
+        return
     
+    # Get date range
+    start_date, end_date = get_date_range()
+    logger.info(f"Fetching tweets from {start_date.date()} to {end_date.date()}")
+    
+    # Scrape tweets
     all_tweets = []
     for account in AI_ACCOUNTS:
-        print(f"Processing {account}...")
-        user_id = get_user_id(session, account)
+        logger.info(f"Processing {account}...")
+        user_id = scraper.get_user_id(account)
         if not user_id:
-            print(f"Could not find user ID for {account}")
+            logger.warning(f"Could not find user ID for {account}")
             continue
         
-        tweets = get_user_tweets(session, user_id, start_date, end_date)
+        tweets = scraper.get_user_tweets(user_id, start_date, end_date)
         if tweets:
-            print(f"Found {len(tweets)} tweets from {account}")
+            logger.info(f"Found {len(tweets)} tweets from {account}")
             all_tweets.extend(tweets)
         
         time.sleep(random.uniform(1, 3))  # Rate limiting
     
-    summary = summarize_tweets(all_tweets)
-    print("\nGenerated Summary:\n")
-    print(summary)
+    # Generate and send summary
+    summary = generate_summary(all_tweets)
+    logger.info("\nGenerated Summary:\n" + summary)
     
-    post_to_slack(summary)
-    print("Summary posted to Slack")
+    if not send_to_slack(summary):
+        logger.error("Failed to send summary to Slack")
 
 if __name__ == "__main__":
     main()
