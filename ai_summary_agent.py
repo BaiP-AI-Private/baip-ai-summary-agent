@@ -23,7 +23,13 @@ AI_ACCOUNTS = [
     "xai",
     "AnthropicAI",
     "GoogleDeepMind",
-    "MistralAI"
+    "MistralAI",
+    "AIatMeta",
+    "Cohere",
+    "perplexity_ai",
+    "scale_ai",
+    "runwayml",
+    "AnthropicAI"
 ]
 
 USER_AGENTS = [
