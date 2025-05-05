@@ -29,7 +29,8 @@ AI_ACCOUNTS = [
     "perplexity_ai",
     "scale_ai",
     "runwayml",
-    "AnthropicAI"
+    "AnthropicAI",
+    "dair_ai"
 ]
 
 USER_AGENTS = [
