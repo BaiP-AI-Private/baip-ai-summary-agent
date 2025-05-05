@@ -30,8 +30,7 @@ AI_ACCOUNTS = [
     "scale_ai",
     "runwayml",
     "AnthropicAI",
-    "dair_ai",
-    "WilliamBryk"
+    "dair_ai"
 ]
 
 USER_AGENTS = [
