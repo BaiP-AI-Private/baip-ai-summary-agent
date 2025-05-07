@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 import time
 import random
 import logging
+from bs4 import BeautifulSoup
+import pytz
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,119 +35,200 @@ AI_ACCOUNTS = [
 ]
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 ]
 
-TWITTER_AUTH_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+# List of Nitter instances (updated with more reliable ones)
+NITTER_INSTANCES = [
+    "https://nitter.net",
+    "https://nitter.privacydev.net",
+    "https://nitter.poast.org",
+    "https://nitter.woodland.cafe",
+    "https://nitter.weiler.rocks",
+    "https://nitter.rawbit.ninja",
+    "https://nitter.moomoo.me",
+    "https://nitter.1d4.us",
+    "https://nitter.kavin.rocks",
+    "https://nitter.unixfox.eu"
+]
 
 class TwitterScraper:
     def __init__(self):
         self.session = requests.Session()
         self.session.verify = certifi.where()
         self.setup_session()
+        self.available_instances = self.get_available_instances()
+        if not self.available_instances:
+            raise Exception("No available Nitter instances found")
+        self.current_instance = random.choice(self.available_instances)
+        self.tried_instances = set()
         
     def setup_session(self):
-        """Initialize session with headers and authentication"""
+        """Initialize session with headers"""
         self.session.headers.update({
             "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Origin": "https://twitter.com",
-            "Referer": "https://twitter.com/",
-            "Authorization": f"Bearer {TWITTER_AUTH_TOKEN}",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0"
         })
-        self.activate_guest_token()
-        
-    def activate_guest_token(self):
-        """Get and set guest token for session"""
-        try:
-            response = self.session.post("https://api.twitter.com/1.1/guest/activate.json")
-            if response.status_code == 200:
-                guest_token = response.json().get("guest_token")
-                self.session.headers.update({"x-guest-token": guest_token})
-                logger.info("Successfully obtained guest token")
-                return True
-        except Exception as e:
-            logger.error(f"Error getting guest token: {e}")
-        return False
-    
-    def get_user_id(self, username):
-        """Get Twitter user ID from username"""
-        params = {
-            "variables": json.dumps({"screen_name": username, "withHighlightedLabel": True})
-        }
+        return True
+
+    def check_instance_availability(self, instance):
+        """Check if a Nitter instance is available"""
         try:
             response = self.session.get(
-                "https://twitter.com/i/api/graphql/4S2ihIKfF3xhp-ENxvUAfQ/UserByScreenName",
-                params=params
+                f"{instance}/OpenAI",
+                timeout=5,
+                verify=False,
+                allow_redirects=True
             )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("data", {}).get("user", {}).get("rest_id")
-        except Exception as e:
-            logger.error(f"Error getting user ID for {username}: {e}")
-        return None
+            return response.status_code == 200
+        except:
+            return False
+
+    def get_available_instances(self):
+        """Get list of available Nitter instances"""
+        available = []
+        for instance in NITTER_INSTANCES:
+            if self.check_instance_availability(instance):
+                available.append(instance)
+                logger.info(f"Found available Nitter instance: {instance}")
+        return available
     
-    def get_user_tweets(self, user_id, start_date, end_date, limit=10):
+    def get_user_tweets(self, username, start_date, end_date, limit=10):
         """Fetch user tweets within date range"""
-        variables = {
-            "userId": user_id,
-            "count": limit,
-            "includePromotedContent": False,
-            "withVoice": True,
-            "withV2Timeline": True
-        }
-        
-        features = {
-            "responsive_web_graphql_timeline_navigation_enabled": True,
-            "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-        }
-        
-        params = {
-            "variables": json.dumps(variables),
-            "features": json.dumps(features)
-        }
-        
-        try:
-            response = self.session.get(
-                "https://twitter.com/i/api/graphql/zICd6x_warY0bzMRm-piIg/UserTweets",
-                params=params
-            )
-            
-            if response.status_code == 200:
-                return self.parse_tweets(response.json(), start_date, end_date)
-        except Exception as e:
-            logger.error(f"Error fetching tweets: {e}")
-        return []
-    
-    def parse_tweets(self, data, start_date, end_date):
-        """Parse tweets from API response"""
         tweets = []
-        instructions = data.get("data", {}).get("user", {}).get("result", {}).get("timeline_v2", {}).get("timeline", {}).get("instructions", [])
+        page = 1
         
-        for instruction in instructions:
-            if instruction.get("type") == "TimelineAddEntries":
-                for entry in instruction.get("entries", []):
-                    content = entry.get("content", {})
-                    if "itemContent" in content and "tweet_results" in content["itemContent"]:
-                        tweet = content["itemContent"]["tweet_results"].get("result", {})
-                        if "legacy" in tweet:
+        while len(tweets) < limit and len(self.tried_instances) < len(self.available_instances):
+            try:
+                url = f"{self.current_instance}/{username}"
+                if page > 1:
+                    url += f"?page={page}"
+                
+                logger.info(f"Fetching from URL: {url}")
+                
+                # Try with SSL verification first
+                try:
+                    response = self.session.get(
+                        url,
+                        timeout=10,
+                        allow_redirects=True
+                    )
+                except requests.exceptions.SSLError:
+                    # If SSL verification fails, try without verification
+                    logger.warning(f"SSL verification failed for {self.current_instance}, trying without verification")
+                    response = self.session.get(
+                        url,
+                        verify=False,
+                        timeout=10,
+                        allow_redirects=True
+                    )
+                
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    tweet_containers = soup.find_all('div', class_='tweet-content')
+                    
+                    if not tweet_containers:
+                        logger.warning(f"No tweets found on page {page} for {username}")
+                        # Try another instance if no tweets found
+                        self.tried_instances.add(self.current_instance)
+                        remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
+                        if remaining_instances:
+                            self.current_instance = random.choice(remaining_instances)
+                            continue
+                        break
+                    
+                    logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
+                    
+                    for container in tweet_containers:
+                        try:
+                            tweet_text = container.get_text(strip=True)
+                            tweet_time_element = container.find_previous('span', class_='tweet-date')
+                            if not tweet_time_element:
+                                logger.warning("Could not find tweet date element")
+                                continue
+                                
+                            tweet_time = tweet_time_element.find('a')['title']
+                            logger.info(f"Found tweet with time: {tweet_time}")
+                            
+                            # Try different date formats
                             try:
-                                tweet_date = datetime.strptime(tweet["legacy"]["created_at"], "%a %b %d %H:%M:%S %z %Y")
-                                if start_date <= tweet_date <= end_date:
-                                    tweets.append(tweet["legacy"]["full_text"])
-                            except Exception as e:
-                                logger.error(f"Error parsing tweet date: {e}")
+                                tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
+                            except ValueError:
+                                try:
+                                    tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %H:%M UTC')
+                                except ValueError:
+                                    logger.warning(f"Could not parse tweet date: {tweet_time}")
+                                    continue
+                            
+                            # Convert to UTC if not already
+                            if tweet_date.tzinfo is None:
+                                tweet_date = pytz.UTC.localize(tweet_date)
+                            
+                            logger.info(f"Parsed tweet date: {tweet_date}")
+                            logger.info(f"Date range: {start_date} to {end_date}")
+                            
+                            if start_date <= tweet_date <= end_date:
+                                tweets.append(tweet_text)
+                                logger.info(f"Added tweet: {tweet_text[:50]}...")
+                                if len(tweets) >= limit:
+                                    break
+                            else:
+                                logger.info(f"Tweet date {tweet_date} outside range {start_date} to {end_date}")
+                                
+                        except Exception as e:
+                            logger.warning(f"Error parsing tweet: {e}")
+                            continue
+                    
+                    page += 1
+                    time.sleep(random.uniform(2, 4))  # Increased rate limiting
+                else:
+                    logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
+                    self.tried_instances.add(self.current_instance)
+                    remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
+                    if remaining_instances:
+                        self.current_instance = random.choice(remaining_instances)
+                        time.sleep(random.uniform(3, 5))  # Longer delay after error
+                        continue
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error fetching tweets for {username}: {e}")
+                self.tried_instances.add(self.current_instance)
+                remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
+                if remaining_instances:
+                    self.current_instance = random.choice(remaining_instances)
+                    time.sleep(random.uniform(3, 5))  # Longer delay after error
+                    continue
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error for {username}: {e}")
+                break
+        
+        logger.info(f"Found {len(tweets)} tweets for {username}")
         return tweets
 
 def get_date_range():
-    """Get yesterday's date range in UTC"""
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0)
+    """Get date range for the last 24 hours in UTC"""
+    utc = pytz.UTC
+    end = datetime.now(utc)
+    start = end - timedelta(days=1)
+    
+    # Log the actual dates being used
+    logger.info(f"Current UTC time: {end}")
+    logger.info(f"Start date: {start}")
+    logger.info(f"End date: {end}")
     return start, end
 
 def generate_summary(tweets):
@@ -216,38 +299,43 @@ def main():
         logger.error(f"Missing environment variables: {', '.join(missing)}")
         return
     
-    # Initialize scraper
-    scraper = TwitterScraper()
-    if not scraper.session.headers.get("x-guest-token"):
-        logger.error("Failed to initialize Twitter session")
-        return
-    
-    # Get date range
-    start_date, end_date = get_date_range()
-    logger.info(f"Fetching tweets from {start_date.date()} to {end_date.date()}")
-    
-    # Scrape tweets
-    all_tweets = []
-    for account in AI_ACCOUNTS:
-        logger.info(f"Processing {account}...")
-        user_id = scraper.get_user_id(account)
-        if not user_id:
-            logger.warning(f"Could not find user ID for {account}")
-            continue
+    try:
+        # Initialize scraper
+        scraper = TwitterScraper()
+        if not scraper.setup_session():
+            logger.error("Failed to initialize scraper session")
+            return
         
-        tweets = scraper.get_user_tweets(user_id, start_date, end_date)
-        if tweets:
-            logger.info(f"Found {len(tweets)} tweets from {account}")
-            all_tweets.extend(tweets)
+        # Get date range
+        start_date, end_date = get_date_range()
+        logger.info(f"Fetching tweets from {start_date} to {end_date}")
         
-        time.sleep(random.uniform(1, 3))  # Rate limiting
-    
-    # Generate and send summary
-    summary = generate_summary(all_tweets)
-    logger.info("\nGenerated Summary:\n" + summary)
-    
-    if not send_to_slack(summary):
-        logger.error("Failed to send summary to Slack")
+        # Scrape tweets
+        all_tweets = []
+        for account in AI_ACCOUNTS:
+            logger.info(f"Processing {account}...")
+            tweets = scraper.get_user_tweets(account, start_date, end_date)
+            if tweets:
+                logger.info(f"Found {len(tweets)} tweets from {account}")
+                all_tweets.extend(tweets)
+            else:
+                logger.warning(f"No tweets found for {account} in the last 24 hours")
+            
+            time.sleep(random.uniform(3, 5))  # Increased rate limiting
+        
+        if not all_tweets:
+            logger.warning("No tweets found from any account in the last 24 hours")
+            return
+            
+        # Generate and send summary
+        summary = generate_summary(all_tweets)
+        logger.info("\nGenerated Summary:\n" + summary)
+        
+        if not send_to_slack(summary):
+            logger.error("Failed to send summary to Slack")
+    except Exception as e:
+        logger.error(f"Critical error in main execution: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
