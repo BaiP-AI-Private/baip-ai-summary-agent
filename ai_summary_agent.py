@@ -9,6 +9,7 @@ import time
 import random
 import logging
 from bs4 import BeautifulSoup
+import pytz
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,10 +35,10 @@ AI_ACCOUNTS = [
 ]
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 ]
 
 # List of Nitter instances (updated with more reliable ones)
@@ -71,13 +72,26 @@ class TwitterScraper:
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0"
         })
         return True
 
     def check_instance_availability(self, instance):
         """Check if a Nitter instance is available"""
         try:
-            response = self.session.get(f"{instance}/OpenAI", timeout=5, verify=False)
+            response = self.session.get(
+                f"{instance}/OpenAI",
+                timeout=5,
+                verify=False,
+                allow_redirects=True
+            )
             return response.status_code == 200
         except:
             return False
@@ -106,11 +120,20 @@ class TwitterScraper:
                 
                 # Try with SSL verification first
                 try:
-                    response = self.session.get(url, timeout=10)
+                    response = self.session.get(
+                        url,
+                        timeout=10,
+                        allow_redirects=True
+                    )
                 except requests.exceptions.SSLError:
                     # If SSL verification fails, try without verification
                     logger.warning(f"SSL verification failed for {self.current_instance}, trying without verification")
-                    response = self.session.get(url, verify=False, timeout=10)
+                    response = self.session.get(
+                        url,
+                        verify=False,
+                        timeout=10,
+                        allow_redirects=True
+                    )
                 
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
@@ -149,6 +172,10 @@ class TwitterScraper:
                                     logger.warning(f"Could not parse tweet date: {tweet_time}")
                                     continue
                             
+                            # Convert to UTC if not already
+                            if tweet_date.tzinfo is None:
+                                tweet_date = pytz.UTC.localize(tweet_date)
+                            
                             logger.info(f"Parsed tweet date: {tweet_date}")
                             logger.info(f"Date range: {start_date} to {end_date}")
                             
@@ -165,14 +192,14 @@ class TwitterScraper:
                             continue
                     
                     page += 1
-                    time.sleep(random.uniform(1, 2))  # Rate limiting
+                    time.sleep(random.uniform(2, 4))  # Increased rate limiting
                 else:
                     logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
                     self.tried_instances.add(self.current_instance)
                     remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
                     if remaining_instances:
                         self.current_instance = random.choice(remaining_instances)
-                        time.sleep(random.uniform(2, 4))  # Longer delay after error
+                        time.sleep(random.uniform(3, 5))  # Longer delay after error
                         continue
                     break
                     
@@ -182,7 +209,7 @@ class TwitterScraper:
                 remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
                 if remaining_instances:
                     self.current_instance = random.choice(remaining_instances)
-                    time.sleep(random.uniform(2, 4))  # Longer delay after error
+                    time.sleep(random.uniform(3, 5))  # Longer delay after error
                     continue
                 break
             except Exception as e:
@@ -194,9 +221,11 @@ class TwitterScraper:
 
 def get_date_range():
     """Get date range for the last 24 hours in UTC"""
-    end = datetime.utcnow()
+    utc = pytz.UTC
+    end = datetime.now(utc)
     start = end - timedelta(days=1)
-    # Ensure we're using the correct date range
+    
+    # Log the actual dates being used
     logger.info(f"Current UTC time: {end}")
     logger.info(f"Start date: {start}")
     logger.info(f"End date: {end}")
@@ -292,7 +321,7 @@ def main():
             else:
                 logger.warning(f"No tweets found for {account} in the last 24 hours")
             
-            time.sleep(random.uniform(2, 4))  # Rate limiting
+            time.sleep(random.uniform(3, 5))  # Increased rate limiting
         
         if not all_tweets:
             logger.warning("No tweets found from any account in the last 24 hours")
