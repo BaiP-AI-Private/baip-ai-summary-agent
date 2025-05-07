@@ -40,18 +40,18 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36"
 ]
 
-# List of Nitter instances
+# List of Nitter instances (updated with more reliable ones)
 NITTER_INSTANCES = [
     "https://nitter.net",
-    "https://nitter.1d4.us",
-    "https://nitter.kavin.rocks",
-    "https://nitter.unixfox.eu",
-    "https://nitter.moomoo.me",
     "https://nitter.privacydev.net",
     "https://nitter.poast.org",
     "https://nitter.woodland.cafe",
     "https://nitter.weiler.rocks",
-    "https://nitter.rawbit.ninja"
+    "https://nitter.rawbit.ninja",
+    "https://nitter.moomoo.me",
+    "https://nitter.1d4.us",
+    "https://nitter.kavin.rocks",
+    "https://nitter.unixfox.eu"
 ]
 
 class TwitterScraper:
@@ -59,7 +59,10 @@ class TwitterScraper:
         self.session = requests.Session()
         self.session.verify = certifi.where()
         self.setup_session()
-        self.current_instance = random.choice(NITTER_INSTANCES)
+        self.available_instances = self.get_available_instances()
+        if not self.available_instances:
+            raise Exception("No available Nitter instances found")
+        self.current_instance = random.choice(self.available_instances)
         self.tried_instances = set()
         
     def setup_session(self):
@@ -70,14 +73,30 @@ class TwitterScraper:
             "Accept-Language": "en-US,en;q=0.5",
         })
         return True
+
+    def check_instance_availability(self, instance):
+        """Check if a Nitter instance is available"""
+        try:
+            response = self.session.get(f"{instance}/OpenAI", timeout=5, verify=False)
+            return response.status_code == 200
+        except:
+            return False
+
+    def get_available_instances(self):
+        """Get list of available Nitter instances"""
+        available = []
+        for instance in NITTER_INSTANCES:
+            if self.check_instance_availability(instance):
+                available.append(instance)
+                logger.info(f"Found available Nitter instance: {instance}")
+        return available
     
     def get_user_tweets(self, username, start_date, end_date, limit=10):
         """Fetch user tweets within date range"""
         tweets = []
         page = 1
-        max_retries = 3
         
-        while len(tweets) < limit and len(self.tried_instances) < len(NITTER_INSTANCES):
+        while len(tweets) < limit and len(self.tried_instances) < len(self.available_instances):
             try:
                 url = f"{self.current_instance}/{username}"
                 if page > 1:
@@ -97,6 +116,12 @@ class TwitterScraper:
                     
                     if not tweet_containers:
                         logger.warning(f"No tweets found on page {page} for {username}")
+                        # Try another instance if no tweets found
+                        self.tried_instances.add(self.current_instance)
+                        remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
+                        if remaining_instances:
+                            self.current_instance = random.choice(remaining_instances)
+                            continue
                         break
                     
                     for container in tweet_containers:
@@ -118,15 +143,22 @@ class TwitterScraper:
                 else:
                     logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
                     self.tried_instances.add(self.current_instance)
-                    self.current_instance = random.choice([i for i in NITTER_INSTANCES if i not in self.tried_instances])
-                    continue
+                    remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
+                    if remaining_instances:
+                        self.current_instance = random.choice(remaining_instances)
+                        time.sleep(random.uniform(2, 4))  # Longer delay after error
+                        continue
+                    break
                     
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error fetching tweets for {username}: {e}")
                 self.tried_instances.add(self.current_instance)
-                self.current_instance = random.choice([i for i in NITTER_INSTANCES if i not in self.tried_instances])
-                time.sleep(random.uniform(2, 4))  # Longer delay after error
-                continue
+                remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
+                if remaining_instances:
+                    self.current_instance = random.choice(remaining_instances)
+                    time.sleep(random.uniform(2, 4))  # Longer delay after error
+                    continue
+                break
             except Exception as e:
                 logger.error(f"Unexpected error for {username}: {e}")
                 break
@@ -210,33 +242,37 @@ def main():
         logger.error(f"Missing environment variables: {', '.join(missing)}")
         return
     
-    # Initialize scraper
-    scraper = TwitterScraper()
-    if not scraper.setup_session():
-        logger.error("Failed to initialize scraper session")
-        return
-    
-    # Get date range
-    start_date, end_date = get_date_range()
-    logger.info(f"Fetching tweets from {start_date.date()} to {end_date.date()}")
-    
-    # Scrape tweets
-    all_tweets = []
-    for account in AI_ACCOUNTS:
-        logger.info(f"Processing {account}...")
-        tweets = scraper.get_user_tweets(account, start_date, end_date)
-        if tweets:
-            logger.info(f"Found {len(tweets)} tweets from {account}")
-            all_tweets.extend(tweets)
+    try:
+        # Initialize scraper
+        scraper = TwitterScraper()
+        if not scraper.setup_session():
+            logger.error("Failed to initialize scraper session")
+            return
         
-        time.sleep(random.uniform(2, 4))  # Rate limiting
-    
-    # Generate and send summary
-    summary = generate_summary(all_tweets)
-    logger.info("\nGenerated Summary:\n" + summary)
-    
-    if not send_to_slack(summary):
-        logger.error("Failed to send summary to Slack")
+        # Get date range
+        start_date, end_date = get_date_range()
+        logger.info(f"Fetching tweets from {start_date.date()} to {end_date.date()}")
+        
+        # Scrape tweets
+        all_tweets = []
+        for account in AI_ACCOUNTS:
+            logger.info(f"Processing {account}...")
+            tweets = scraper.get_user_tweets(account, start_date, end_date)
+            if tweets:
+                logger.info(f"Found {len(tweets)} tweets from {account}")
+                all_tweets.extend(tweets)
+            
+            time.sleep(random.uniform(2, 4))  # Rate limiting
+        
+        # Generate and send summary
+        summary = generate_summary(all_tweets)
+        logger.info("\nGenerated Summary:\n" + summary)
+        
+        if not send_to_slack(summary):
+            logger.error("Failed to send summary to Slack")
+    except Exception as e:
+        logger.error(f"Critical error in main execution: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
