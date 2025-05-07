@@ -102,6 +102,8 @@ class TwitterScraper:
                 if page > 1:
                     url += f"?page={page}"
                 
+                logger.info(f"Fetching from URL: {url}")
+                
                 # Try with SSL verification first
                 try:
                     response = self.session.get(url, timeout=10)
@@ -124,16 +126,40 @@ class TwitterScraper:
                             continue
                         break
                     
+                    logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
+                    
                     for container in tweet_containers:
                         try:
                             tweet_text = container.get_text(strip=True)
-                            tweet_time = container.find_previous('span', class_='tweet-date').find('a')['title']
-                            tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
+                            tweet_time_element = container.find_previous('span', class_='tweet-date')
+                            if not tweet_time_element:
+                                logger.warning("Could not find tweet date element")
+                                continue
+                                
+                            tweet_time = tweet_time_element.find('a')['title']
+                            logger.info(f"Found tweet with time: {tweet_time}")
+                            
+                            # Try different date formats
+                            try:
+                                tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
+                            except ValueError:
+                                try:
+                                    tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %H:%M UTC')
+                                except ValueError:
+                                    logger.warning(f"Could not parse tweet date: {tweet_time}")
+                                    continue
+                            
+                            logger.info(f"Parsed tweet date: {tweet_date}")
+                            logger.info(f"Date range: {start_date} to {end_date}")
                             
                             if start_date <= tweet_date <= end_date:
                                 tweets.append(tweet_text)
+                                logger.info(f"Added tweet: {tweet_text[:50]}...")
                                 if len(tweets) >= limit:
                                     break
+                            else:
+                                logger.info(f"Tweet date {tweet_date} outside range {start_date} to {end_date}")
+                                
                         except Exception as e:
                             logger.warning(f"Error parsing tweet: {e}")
                             continue
@@ -170,8 +196,10 @@ def get_date_range():
     """Get date range for the last 24 hours in UTC"""
     end = datetime.utcnow()
     start = end - timedelta(days=1)
-    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = end.replace(hour=23, minute=59, second=59, microsecond=0)
+    # Ensure we're using the correct date range
+    logger.info(f"Current UTC time: {end}")
+    logger.info(f"Start date: {start}")
+    logger.info(f"End date: {end}")
     return start, end
 
 def generate_summary(tweets):
@@ -251,7 +279,7 @@ def main():
         
         # Get date range
         start_date, end_date = get_date_range()
-        logger.info(f"Fetching tweets from {start_date.date()} to {end_date.date()}")
+        logger.info(f"Fetching tweets from {start_date} to {end_date}")
         
         # Scrape tweets
         all_tweets = []
@@ -261,9 +289,15 @@ def main():
             if tweets:
                 logger.info(f"Found {len(tweets)} tweets from {account}")
                 all_tweets.extend(tweets)
+            else:
+                logger.warning(f"No tweets found for {account} in the last 24 hours")
             
             time.sleep(random.uniform(2, 4))  # Rate limiting
         
+        if not all_tweets:
+            logger.warning("No tweets found from any account in the last 24 hours")
+            return
+            
         # Generate and send summary
         summary = generate_summary(all_tweets)
         logger.info("\nGenerated Summary:\n" + summary)
