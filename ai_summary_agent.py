@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import time
 import random
 import logging
+from bs4 import BeautifulSoup
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,125 +40,80 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36"
 ]
 
-TWITTER_AUTH_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+# List of Nitter instances
+NITTER_INSTANCES = [
+    "https://nitter.net",
+    "https://nitter.1d4.us",
+    "https://nitter.kavin.rocks",
+    "https://nitter.unixfox.eu",
+    "https://nitter.moomoo.me"
+]
 
 class TwitterScraper:
     def __init__(self):
         self.session = requests.Session()
         self.session.verify = certifi.where()
         self.setup_session()
+        self.current_instance = random.choice(NITTER_INSTANCES)
         
     def setup_session(self):
-        """Initialize session with headers and authentication"""
+        """Initialize session with headers"""
         self.session.headers.update({
             "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Origin": "https://twitter.com",
-            "Referer": "https://twitter.com/",
-            "Authorization": f"Bearer {TWITTER_AUTH_TOKEN}",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
         })
-        self.activate_guest_token()
-        
-    def activate_guest_token(self):
-        """Get and set guest token for session"""
-        try:
-            response = self.session.post("https://api.twitter.com/1.1/guest/activate.json")
-            if response.status_code == 200:
-                guest_token = response.json().get("guest_token")
-                self.session.headers.update({"x-guest-token": guest_token})
-                logger.info("Successfully obtained guest token")
-                return True
-        except Exception as e:
-            logger.error(f"Error getting guest token: {e}")
-        return False
+        return True
     
-    def get_user_id(self, username):
-        """Get Twitter user ID from username"""
-        params = {
-            "variables": json.dumps({"screen_name": username, "withHighlightedLabel": True})
-        }
-        try:
-            response = self.session.get(
-                "https://twitter.com/i/api/graphql/4S2ihIKfF3xhp-ENxvUAfQ/UserByScreenName",
-                params=params
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("data", {}).get("user", {}).get("rest_id")
-        except Exception as e:
-            logger.error(f"Error getting user ID for {username}: {e}")
-        return None
-    
-    def get_user_tweets(self, user_id, start_date, end_date, limit=10):
+    def get_user_tweets(self, username, start_date, end_date, limit=10):
         """Fetch user tweets within date range"""
-        variables = {
-            "userId": user_id,
-            "count": limit,
-            "includePromotedContent": False,
-            "withVoice": True,
-            "withV2Timeline": True
-        }
-        
-        features = {
-            "responsive_web_graphql_timeline_navigation_enabled": True,
-            "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-        }
-        
-        params = {
-            "variables": json.dumps(variables),
-            "features": json.dumps(features)
-        }
-        
-        try:
-            logger.info(f"Fetching tweets for user_id: {user_id}")
-            logger.info(f"Date range: {start_date} to {end_date}")
-            response = self.session.get(
-                "https://twitter.com/i/api/graphql/zICd6x_warY0bzMRm-piIg/UserTweets",
-                params=params
-            )
-            
-            if response.status_code == 200:
-                logger.info(f"Successfully got response from Twitter API")
-                return self.parse_tweets(response.json(), start_date, end_date)
-            else:
-                logger.error(f"Twitter API returned status code: {response.status_code}")
-                logger.error(f"Response content: {response.text}")
-        except Exception as e:
-            logger.error(f"Error fetching tweets: {e}")
-        return []
-    
-    def parse_tweets(self, data, start_date, end_date):
-        """Parse tweets from API response"""
         tweets = []
-        instructions = data.get("data", {}).get("user", {}).get("result", {}).get("timeline_v2", {}).get("timeline", {}).get("instructions", [])
+        page = 1
         
-        logger.info(f"Found {len(instructions)} instructions in response")
+        while len(tweets) < limit:
+            try:
+                url = f"{self.current_instance}/{username}"
+                if page > 1:
+                    url += f"?page={page}"
+                
+                response = self.session.get(url)
+                
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    tweet_containers = soup.find_all('div', class_='tweet-content')
+                    
+                    if not tweet_containers:
+                        break
+                    
+                    for container in tweet_containers:
+                        tweet_text = container.get_text(strip=True)
+                        tweet_time = container.find_previous('span', class_='tweet-date').find('a')['title']
+                        tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
+                        
+                        if start_date <= tweet_date <= end_date:
+                            tweets.append(tweet_text)
+                            if len(tweets) >= limit:
+                                break
+                    
+                    page += 1
+                    time.sleep(random.uniform(1, 2))  # Rate limiting
+                else:
+                    logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
+                    # Try another Nitter instance
+                    self.current_instance = random.choice([i for i in NITTER_INSTANCES if i != self.current_instance])
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error fetching tweets for {username}: {e}")
+                break
         
-        for instruction in instructions:
-            if instruction.get("type") == "TimelineAddEntries":
-                entries = instruction.get("entries", [])
-                logger.info(f"Found {len(entries)} entries in TimelineAddEntries")
-                for entry in entries:
-                    content = entry.get("content", {})
-                    if "itemContent" in content and "tweet_results" in content["itemContent"]:
-                        tweet = content["itemContent"]["tweet_results"].get("result", {})
-                        if "legacy" in tweet:
-                            try:
-                                tweet_date = datetime.strptime(tweet["legacy"]["created_at"], "%a %b %d %H:%M:%S %z %Y")
-                                logger.info(f"Found tweet from {tweet_date}")
-                                if start_date <= tweet_date <= end_date:
-                                    tweets.append(tweet["legacy"]["full_text"])
-                                    logger.info(f"Added tweet to list: {tweet['legacy']['full_text'][:50]}...")
-                            except Exception as e:
-                                logger.error(f"Error parsing tweet date: {e}")
-        logger.info(f"Total tweets found in date range: {len(tweets)}")
+        logger.info(f"Found {len(tweets)} tweets for {username}")
         return tweets
 
 def get_date_range():
-    """Get date range for the last 2 days in UTC"""
+    """Get date range for the last 24 hours in UTC"""
     end = datetime.utcnow()
-    start = end - timedelta(days=2)
+    start = end - timedelta(days=1)
     start = start.replace(hour=0, minute=0, second=0, microsecond=0)
     end = end.replace(hour=23, minute=59, second=59, microsecond=0)
     return start, end
@@ -232,8 +188,8 @@ def main():
     
     # Initialize scraper
     scraper = TwitterScraper()
-    if not scraper.session.headers.get("x-guest-token"):
-        logger.error("Failed to initialize Twitter session")
+    if not scraper.setup_session():
+        logger.error("Failed to initialize scraper session")
         return
     
     # Get date range
@@ -244,17 +200,12 @@ def main():
     all_tweets = []
     for account in AI_ACCOUNTS:
         logger.info(f"Processing {account}...")
-        user_id = scraper.get_user_id(account)
-        if not user_id:
-            logger.warning(f"Could not find user ID for {account}")
-            continue
-        
-        tweets = scraper.get_user_tweets(user_id, start_date, end_date)
+        tweets = scraper.get_user_tweets(account, start_date, end_date)
         if tweets:
             logger.info(f"Found {len(tweets)} tweets from {account}")
             all_tweets.extend(tweets)
         
-        time.sleep(random.uniform(1, 3))  # Rate limiting
+        time.sleep(random.uniform(2, 4))  # Rate limiting
     
     # Generate and send summary
     summary = generate_summary(all_tweets)
