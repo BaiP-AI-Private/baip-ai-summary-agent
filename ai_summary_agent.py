@@ -110,13 +110,19 @@ class TwitterScraper:
         }
         
         try:
+            logger.info(f"Fetching tweets for user_id: {user_id}")
+            logger.info(f"Date range: {start_date} to {end_date}")
             response = self.session.get(
                 "https://twitter.com/i/api/graphql/zICd6x_warY0bzMRm-piIg/UserTweets",
                 params=params
             )
             
             if response.status_code == 200:
+                logger.info(f"Successfully got response from Twitter API")
                 return self.parse_tweets(response.json(), start_date, end_date)
+            else:
+                logger.error(f"Twitter API returned status code: {response.status_code}")
+                logger.error(f"Response content: {response.text}")
         except Exception as e:
             logger.error(f"Error fetching tweets: {e}")
         return []
@@ -126,26 +132,34 @@ class TwitterScraper:
         tweets = []
         instructions = data.get("data", {}).get("user", {}).get("result", {}).get("timeline_v2", {}).get("timeline", {}).get("instructions", [])
         
+        logger.info(f"Found {len(instructions)} instructions in response")
+        
         for instruction in instructions:
             if instruction.get("type") == "TimelineAddEntries":
-                for entry in instruction.get("entries", []):
+                entries = instruction.get("entries", [])
+                logger.info(f"Found {len(entries)} entries in TimelineAddEntries")
+                for entry in entries:
                     content = entry.get("content", {})
                     if "itemContent" in content and "tweet_results" in content["itemContent"]:
                         tweet = content["itemContent"]["tweet_results"].get("result", {})
                         if "legacy" in tweet:
                             try:
                                 tweet_date = datetime.strptime(tweet["legacy"]["created_at"], "%a %b %d %H:%M:%S %z %Y")
+                                logger.info(f"Found tweet from {tweet_date}")
                                 if start_date <= tweet_date <= end_date:
                                     tweets.append(tweet["legacy"]["full_text"])
+                                    logger.info(f"Added tweet to list: {tweet['legacy']['full_text'][:50]}...")
                             except Exception as e:
                                 logger.error(f"Error parsing tweet date: {e}")
+        logger.info(f"Total tweets found in date range: {len(tweets)}")
         return tweets
 
 def get_date_range():
-    """Get yesterday's date range in UTC"""
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=0)
+    """Get date range for the last 2 days in UTC"""
+    end = datetime.utcnow()
+    start = end - timedelta(days=2)
+    start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = end.replace(hour=23, minute=59, second=59, microsecond=0)
     return start, end
 
 def generate_summary(tweets):
