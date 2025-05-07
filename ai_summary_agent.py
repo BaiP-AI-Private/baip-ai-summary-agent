@@ -46,7 +46,12 @@ NITTER_INSTANCES = [
     "https://nitter.1d4.us",
     "https://nitter.kavin.rocks",
     "https://nitter.unixfox.eu",
-    "https://nitter.moomoo.me"
+    "https://nitter.moomoo.me",
+    "https://nitter.privacydev.net",
+    "https://nitter.poast.org",
+    "https://nitter.woodland.cafe",
+    "https://nitter.weiler.rocks",
+    "https://nitter.rawbit.ninja"
 ]
 
 class TwitterScraper:
@@ -55,6 +60,7 @@ class TwitterScraper:
         self.session.verify = certifi.where()
         self.setup_session()
         self.current_instance = random.choice(NITTER_INSTANCES)
+        self.tried_instances = set()
         
     def setup_session(self):
         """Initialize session with headers"""
@@ -69,42 +75,60 @@ class TwitterScraper:
         """Fetch user tweets within date range"""
         tweets = []
         page = 1
+        max_retries = 3
         
-        while len(tweets) < limit:
+        while len(tweets) < limit and len(self.tried_instances) < len(NITTER_INSTANCES):
             try:
                 url = f"{self.current_instance}/{username}"
                 if page > 1:
                     url += f"?page={page}"
                 
-                response = self.session.get(url)
+                # Try with SSL verification first
+                try:
+                    response = self.session.get(url, timeout=10)
+                except requests.exceptions.SSLError:
+                    # If SSL verification fails, try without verification
+                    logger.warning(f"SSL verification failed for {self.current_instance}, trying without verification")
+                    response = self.session.get(url, verify=False, timeout=10)
                 
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     tweet_containers = soup.find_all('div', class_='tweet-content')
                     
                     if not tweet_containers:
+                        logger.warning(f"No tweets found on page {page} for {username}")
                         break
                     
                     for container in tweet_containers:
-                        tweet_text = container.get_text(strip=True)
-                        tweet_time = container.find_previous('span', class_='tweet-date').find('a')['title']
-                        tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
-                        
-                        if start_date <= tweet_date <= end_date:
-                            tweets.append(tweet_text)
-                            if len(tweets) >= limit:
-                                break
+                        try:
+                            tweet_text = container.get_text(strip=True)
+                            tweet_time = container.find_previous('span', class_='tweet-date').find('a')['title']
+                            tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
+                            
+                            if start_date <= tweet_date <= end_date:
+                                tweets.append(tweet_text)
+                                if len(tweets) >= limit:
+                                    break
+                        except Exception as e:
+                            logger.warning(f"Error parsing tweet: {e}")
+                            continue
                     
                     page += 1
                     time.sleep(random.uniform(1, 2))  # Rate limiting
                 else:
                     logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
-                    # Try another Nitter instance
-                    self.current_instance = random.choice([i for i in NITTER_INSTANCES if i != self.current_instance])
+                    self.tried_instances.add(self.current_instance)
+                    self.current_instance = random.choice([i for i in NITTER_INSTANCES if i not in self.tried_instances])
                     continue
                     
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 logger.error(f"Error fetching tweets for {username}: {e}")
+                self.tried_instances.add(self.current_instance)
+                self.current_instance = random.choice([i for i in NITTER_INSTANCES if i not in self.tried_instances])
+                time.sleep(random.uniform(2, 4))  # Longer delay after error
+                continue
+            except Exception as e:
+                logger.error(f"Unexpected error for {username}: {e}")
                 break
         
         logger.info(f"Found {len(tweets)} tweets for {username}")

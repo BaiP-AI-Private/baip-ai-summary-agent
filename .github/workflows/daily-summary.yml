@@ -29,10 +29,11 @@ jobs:
       run: |
         echo "SSL_CERT_FILE=$(python -c 'import certifi; print(certifi.where())')" >> $GITHUB_ENV
         echo "REQUESTS_CA_BUNDLE=$SSL_CERT_FILE" >> $GITHUB_ENV
+        echo "PYTHONWARNINGS=ignore:Unverified HTTPS request" >> $GITHUB_ENV
 
     - name: Run summary generator
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       run: |
-        python ai_summary_agent.py
+        python -W ignore ai_summary_agent.py
