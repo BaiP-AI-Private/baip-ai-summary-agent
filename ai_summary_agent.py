@@ -138,27 +138,37 @@ class TwitterScraper:
                     continue
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
+                # Find all tweet containers
                 tweet_containers = soup.find_all('div', class_='timeline-item')
                 
                 if not tweet_containers:
                     logger.warning(f"No tweets found on page {page} for {username}")
-                    break
+                    # Try another instance
+                    self.current_instance = self.get_working_instance()
+                    if not self.current_instance:
+                        break
+                    continue
                 
                 logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
                 
                 for container in tweet_containers:
                     try:
-                        # Find tweet text
-                        tweet_text = container.find('div', class_='tweet-content')
-                        if not tweet_text:
+                        # Find tweet text - look for the tweet-content div
+                        tweet_text_div = container.find('div', class_='tweet-content')
+                        if not tweet_text_div:
                             continue
                         
-                        # Find tweet date
+                        # Find tweet date - look for the tweet-date span
                         date_element = container.find('span', class_='tweet-date')
                         if not date_element:
                             continue
                             
-                        date_str = date_element.find('a')['title']
+                        # Get the date from the title attribute of the link
+                        date_link = date_element.find('a')
+                        if not date_link or 'title' not in date_link.attrs:
+                            continue
+                            
+                        date_str = date_link['title']
                         logger.debug(f"Found tweet date: {date_str}")
                         
                         # Parse date
@@ -175,18 +185,20 @@ class TwitterScraper:
                         
                         # Check if tweet is within date range
                         if start_date <= tweet_date <= end_date:
-                            tweet_text = tweet_text.get_text(strip=True)
+                            tweet_text = tweet_text_div.get_text(strip=True)
                             tweets.append(f"@{username}: {tweet_text}")
                             logger.info(f"Found tweet from {username} at {tweet_date}")
                         else:
-                            logger.debug(f"Tweet from {tweet_date} outside date range")
+                            logger.debug(f"Tweet from {tweet_date} outside date range {start_date} to {end_date}")
                             
                     except Exception as e:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
                 
                 # Check if we need to continue to next page
-                if len(tweet_containers) < 20:  # Nitter shows 20 tweets per page
+                # If we found less than 20 tweets, we're probably at the last page
+                if len(tweet_containers) < 20:
+                    logger.info(f"Found less than 20 tweets on page {page}, assuming last page")
                     break
                     
                 page += 1
@@ -206,13 +218,17 @@ class TwitterScraper:
         return tweets
 
 def get_date_range():
-    """Get date range for the last 24 hours in UTC"""
+    """Get date range for the previous day in UTC (00:00 to 23:59)"""
     utc = pytz.UTC
-    end = datetime.now(utc)
-    start = end - timedelta(days=1)
+    now = datetime.now(utc)
+    
+    # Set end date to yesterday at 23:59:59
+    end = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=utc) - timedelta(days=1)
+    # Set start date to yesterday at 00:00:00
+    start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=utc) - timedelta(days=1)
     
     # Log the actual dates being used
-    logger.info(f"Current UTC time: {end}")
+    logger.info(f"Current UTC time: {now}")
     logger.info(f"Start date: {start}")
     logger.info(f"End date: {end}")
     return start, end
