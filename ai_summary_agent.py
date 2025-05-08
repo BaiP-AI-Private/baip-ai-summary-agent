@@ -125,6 +125,7 @@ class TwitterScraper:
         load_more_url = None  # URL for loading more tweets
         load_more_clicks = 0  # Track number of load more clicks
         max_load_more_clicks = 5  # Maximum number of load more clicks to simulate
+        found_tweets_in_range = False  # Initialize at the start
 
         while retry_count < max_retries:
             try:
@@ -140,7 +141,8 @@ class TwitterScraper:
                     time.sleep(5)  # Wait before trying new instance
 
                 # Construct the initial URL or use the "Load more" URL
-                url = load_more_url if load_more_url else f"{self.current_instance}/{username}"
+                base_url = f"{self.current_instance}/{username}"
+                url = load_more_url if load_more_url else base_url
                 logger.info(f"Fetching from URL: {url}")
 
                 response = self.session.get(url, timeout=30)
@@ -184,29 +186,42 @@ class TwitterScraper:
 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
+                # Debug: Print the HTML to see what we're getting
+                logger.debug(f"Page HTML: {soup.prettify()[:1000]}")  # Print first 1000 chars for debugging
+                
                 # Find all tweet containers first
                 tweet_containers = soup.find_all('div', class_='timeline-item')
                 if not tweet_containers:
                     tweet_containers = soup.find_all('div', class_='thread-line')
+                    if not tweet_containers:
+                        # Try alternative class names
+                        tweet_containers = soup.find_all('div', class_='tweet-body')
+                        if not tweet_containers:
+                            tweet_containers = soup.find_all('div', class_='tweet')
 
                 if tweet_containers:
                     logger.info(f"Found {len(tweet_containers)} tweet containers")
                     
-                    found_tweets_in_range = False
                     for container in tweet_containers:
                         try:
                             # Find tweet text - look for the tweet-content div
                             tweet_text_div = container.find('div', class_='tweet-content')
                             if not tweet_text_div:
-                                continue
+                                # Try alternative class names
+                                tweet_text_div = container.find('div', class_='tweet-body')
+                                if not tweet_text_div:
+                                    continue
 
                             # Find tweet date - look for the tweet-date span
                             date_element = container.find('span', class_='tweet-date')
                             if not date_element:
-                                continue
+                                # Try alternative class names
+                                date_element = container.find('a', class_='tweet-date')
+                                if not date_element:
+                                    continue
 
                             # Get the date from the title attribute of the link
-                            date_link = date_element.find('a')
+                            date_link = date_element.find('a') if date_element.name != 'a' else date_element
                             if not date_link or 'title' not in date_link.attrs:
                                 continue
 
@@ -245,8 +260,12 @@ class TwitterScraper:
                 if show_more:
                     show_more_link = show_more.find('a')
                     if show_more_link and 'href' in show_more_link.attrs:
-                        load_more_url = f"{self.current_instance}{show_more_link['href']}"
-                        logger.info(f"Found 'show-more' URL: {load_more_url}")
+                        cursor = show_more_link['href']
+                        if cursor.startswith('?'):
+                            load_more_url = f"{base_url}{cursor}"
+                        else:
+                            load_more_url = f"{base_url}?{cursor}"
+                        logger.info(f"Found 'show-more' URL with cursor: {load_more_url}")
                         if load_more_clicks < max_load_more_clicks:
                             load_more_clicks += 1
                             logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
