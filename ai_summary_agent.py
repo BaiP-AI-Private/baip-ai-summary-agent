@@ -184,12 +184,68 @@ class TwitterScraper:
 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Find the "show-more" class and get the href
-                show_more_class = soup.select_one('div.show-more a') or soup.find('a', class_='more-replies')
-                if show_more_class:
-                    logger.debug(f"Show more element found: {show_more_class}")
-                    if 'href' in show_more_class.attrs:
-                        load_more_url = f"{self.current_instance}{show_more_class['href']}"
+                # Find all tweet containers first
+                tweet_containers = soup.find_all('div', class_='timeline-item')
+                if not tweet_containers:
+                    tweet_containers = soup.find_all('div', class_='thread-line')
+
+                if tweet_containers:
+                    logger.info(f"Found {len(tweet_containers)} tweet containers")
+                    
+                    found_tweets_in_range = False
+                    for container in tweet_containers:
+                        try:
+                            # Find tweet text - look for the tweet-content div
+                            tweet_text_div = container.find('div', class_='tweet-content')
+                            if not tweet_text_div:
+                                continue
+
+                            # Find tweet date - look for the tweet-date span
+                            date_element = container.find('span', class_='tweet-date')
+                            if not date_element:
+                                continue
+
+                            # Get the date from the title attribute of the link
+                            date_link = date_element.find('a')
+                            if not date_link or 'title' not in date_link.attrs:
+                                continue
+
+                            date_str = date_link['title']
+                            logger.debug(f"Found tweet date: {date_str}")
+
+                            # Parse date
+                            try:
+                                tweet_date = datetime.strptime(date_str, '%b %d, %Y · %I:%M %p UTC')
+                                tweet_date = pytz.UTC.localize(tweet_date)
+                            except ValueError:
+                                try:
+                                    tweet_date = datetime.strptime(date_str, '%b %d, %Y · %H:%M UTC')
+                                    tweet_date = pytz.UTC.localize(tweet_date)
+                                except ValueError:
+                                    logger.warning(f"Could not parse date: {date_str}")
+                                    continue
+
+                            # Check if tweet is within date range
+                            if start_date <= tweet_date <= end_date:
+                                tweet_text = tweet_text_div.get_text(strip=True)
+                                tweets.append(f"@{username}: {tweet_text}")
+                                logger.info(f"Found tweet from {username} at {tweet_date}")
+                                found_tweets_in_range = True
+                            else:
+                                logger.debug(f"Tweet from {tweet_date} outside date range {start_date} to {end_date}")
+
+                        except Exception as e:
+                            logger.error(f"Error parsing tweet: {e}")
+                            continue
+                else:
+                    logger.warning(f"No tweets found for {username} on this page.")
+
+                # Find the "show-more" button and get its URL
+                show_more = soup.find('div', class_='show-more')
+                if show_more:
+                    show_more_link = show_more.find('a')
+                    if show_more_link and 'href' in show_more_link.attrs:
+                        load_more_url = f"{self.current_instance}{show_more_link['href']}"
                         logger.info(f"Found 'show-more' URL: {load_more_url}")
                         if load_more_clicks < max_load_more_clicks:
                             load_more_clicks += 1
@@ -198,74 +254,16 @@ class TwitterScraper:
                             continue
                     else:
                         logger.warning("Show more element found but missing href attribute")
-                        logger.debug(f"Show more element attributes: {show_more_class.attrs}")
-                
-                # Reset URL if we get here (no valid show more or max clicks reached)
-                load_more_url = None
-                if load_more_clicks >= max_load_more_clicks:
-                    logger.info(f"Reached maximum load more clicks ({max_load_more_clicks})")
+                        if show_more_link:
+                            logger.debug(f"Show more element attributes: {show_more_link.attrs}")
                 else:
-                    logger.info("No 'show-more' button found, assuming last page")
+                    load_more_url = None
+                    if load_more_clicks >= max_load_more_clicks:
+                        logger.info(f"Reached maximum load more clicks ({max_load_more_clicks})")
+                    else:
+                        logger.info("No 'show-more' button found, assuming last page")
 
-                # Find all tweet containers - check for both timeline-item and thread-line classes
-                tweet_containers = soup.find_all('div', class_='timeline-item') or soup.find_all('div', class_='thread-line')
-
-                if not tweet_containers:
-                    logger.warning(f"No tweets found for {username} on this page.")
-                    if load_more_clicks < max_load_more_clicks and load_more_url:
-                        logger.info("Trying to load more tweets...")
-                        continue
-                    break
-
-                logger.info(f"Found {len(tweet_containers)} tweet containers")
-
-                found_tweets_in_range = False
-                for container in tweet_containers:
-                    try:
-                        # Find tweet text - look for the tweet-content div
-                        tweet_text_div = container.find('div', class_='tweet-content')
-                        if not tweet_text_div:
-                            continue
-
-                        # Find tweet date - look for the tweet-date span
-                        date_element = container.find('span', class_='tweet-date')
-                        if not date_element:
-                            continue
-
-                        # Get the date from the title attribute of the link
-                        date_link = date_element.find('a')
-                        if not date_link or 'title' not in date_link.attrs:
-                            continue
-
-                        date_str = date_link['title']
-                        logger.debug(f"Found tweet date: {date_str}")
-
-                        # Parse date
-                        try:
-                            tweet_date = datetime.strptime(date_str, '%b %d, %Y · %I:%M %p UTC')
-                            tweet_date = pytz.UTC.localize(tweet_date)
-                        except ValueError:
-                            try:
-                                tweet_date = datetime.strptime(date_str, '%b %d, %Y · %H:%M UTC')
-                                tweet_date = pytz.UTC.localize(tweet_date)
-                            except ValueError:
-                                logger.warning(f"Could not parse date: {date_str}")
-                                continue
-
-                        # Check if tweet is within date range
-                        if start_date <= tweet_date <= end_date:
-                            tweet_text = tweet_text_div.get_text(strip=True)
-                            tweets.append(f"@{username}: {tweet_text}")
-                            logger.info(f"Found tweet from {username} at {tweet_date}")
-                            found_tweets_in_range = True
-                        else:
-                            logger.debug(f"Tweet from {tweet_date} outside date range {start_date} to {end_date}")
-
-                    except Exception as e:
-                        logger.error(f"Error parsing tweet: {e}")
-                        continue
-
-                # If we've processed all tweets and haven't found any in range, break
+                # If we've processed all tweets and haven't found any in range, and there's no more content, break
                 if not found_tweets_in_range and not load_more_url:
                     break
 
