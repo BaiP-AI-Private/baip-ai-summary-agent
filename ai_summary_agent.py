@@ -122,14 +122,15 @@ class TwitterScraper:
         """Fetch user tweets within date range"""
         tweets = []
         page = 1
+        max_pages = 10  # Limit to 10 pages per account
         
-        while len(tweets) < limit and len(self.tried_instances) < len(self.available_instances):
+        while len(tweets) < limit and len(self.tried_instances) < len(self.available_instances) and page <= max_pages:
             try:
                 url = f"{self.current_instance}/{username}"
                 if page > 1:
                     url += f"?page={page}"
                 
-                logger.info(f"Fetching from URL: {url}")
+                logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
                 
                 # Try with SSL verification first
                 try:
