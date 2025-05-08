@@ -175,9 +175,8 @@ class TwitterScraper:
                 
                 if not tweet_containers:
                     logger.warning(f"No tweets found on page {page} for {username}")
-                    # Check if we've reached the end of the timeline
+                    # If we're on page 1 and no tweets found, try another instance
                     if page == 1:
-                        # On first page, try another instance
                         self.current_instance = self.get_working_instance()
                         if not self.current_instance:
                             retry_count += 1
@@ -238,8 +237,7 @@ class TwitterScraper:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
                 
-                # If we found tweets in range on this page, continue to next page
-                # If we didn't find any tweets in range but found containers, also continue
+                # Always increment page if we found tweet containers
                 # Only stop if we found less than 20 containers (indicating last page)
                 if len(tweet_containers) < 20:
                     logger.info(f"Found less than 20 tweets on page {page}, assuming last page")
@@ -247,6 +245,7 @@ class TwitterScraper:
                 
                 # Move to next page
                 page += 1
+                logger.info(f"Moving to page {page} for {username}")
                 time.sleep(random.uniform(5, 10))  # Increased delay between pages
                 
             except Exception as e:
