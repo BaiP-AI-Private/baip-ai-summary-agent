@@ -184,7 +184,8 @@ class TwitterScraper:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
                 # Find the "Load more" button and get its URL
-                load_more_button = soup.find('a', class_='load-more')
+                # The load more button can have different class names, so we check for both
+                load_more_button = soup.find('a', class_='load-more') or soup.find('a', class_='more-replies')
                 if load_more_button and 'href' in load_more_button.attrs and load_more_clicks < max_load_more_clicks:
                     load_more_url = f"{self.current_instance}{load_more_button['href']}"
                     logger.info(f"Found 'Load more' URL: {load_more_url}")
@@ -199,8 +200,8 @@ class TwitterScraper:
                     else:
                         logger.info("No 'Load more' button found, assuming last page")
 
-                # Find all tweet containers
-                tweet_containers = soup.find_all('div', class_='timeline-item')
+                # Find all tweet containers - check for both timeline-item and thread-line classes
+                tweet_containers = soup.find_all('div', class_='timeline-item') or soup.find_all('div', class_='thread-line')
 
                 if not tweet_containers:
                     logger.warning(f"No tweets found for {username}")
