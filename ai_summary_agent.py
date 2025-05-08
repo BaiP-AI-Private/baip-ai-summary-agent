@@ -110,8 +110,8 @@ class TwitterScraper:
                     logger.info(f"Found working Nitter instance: {instance}")
                     return instance
                 elif response.status_code == 429:
-                    # Set cooldown for rate-limited instance
-                    cooldown = datetime.now() + timedelta(minutes=5)
+                    # Set cooldown for rate-limited instance (2.5 minutes)
+                    cooldown = datetime.now() + timedelta(seconds=150)
                     self.instance_retry_delays[instance] = cooldown
                     logger.warning(f"Instance {instance} rate limited, cooling down until {cooldown}")
             except Exception as e:
@@ -146,8 +146,8 @@ class TwitterScraper:
                 response = self.session.get(url, timeout=30)
                 if response.status_code == 429:
                     logger.warning(f"Rate limited by {self.current_instance}")
-                    # Set cooldown for current instance
-                    cooldown = datetime.now() + timedelta(minutes=5)
+                    # Set cooldown for current instance (2.5 minutes)
+                    cooldown = datetime.now() + timedelta(seconds=150)
                     self.instance_retry_delays[self.current_instance] = cooldown
                     # Try another instance
                     self.current_instance = self.get_working_instance()
