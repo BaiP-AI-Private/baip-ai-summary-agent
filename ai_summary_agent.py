@@ -254,16 +254,24 @@ class TwitterScraper:
                     logger.warning(f"No tweets found for {username} on this page.")
 
                 # Find the "show-more" button and get its URL
-                show_more = soup.select_one('div.show-more')
+                logger.info("Looking for show-more button...")
+                show_more = soup.find('div', class_='show-more')
+                logger.info(f"Show more div found: {show_more}")
+                
                 if show_more:
                     show_more_link = show_more.find('a')
+                    logger.info(f"Show more link found: {show_more_link}")
+                    
                     if show_more_link and 'href' in show_more_link.attrs:
                         cursor = show_more_link['href']
+                        logger.info(f"Found cursor in href: {cursor}")
+                        
                         if cursor.startswith('?'):
                             load_more_url = f"{base_url}{cursor}"
                         else:
                             load_more_url = f"{base_url}?{cursor}"
-                        logger.info(f"Found 'show-more' URL with cursor: {load_more_url}")
+                        logger.info(f"Constructed load more URL: {load_more_url}")
+                        
                         if load_more_clicks < max_load_more_clicks:
                             load_more_clicks += 1
                             logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
@@ -272,7 +280,7 @@ class TwitterScraper:
                     else:
                         logger.warning("Show more element found but missing href attribute")
                         if show_more_link:
-                            logger.debug(f"Show more element attributes: {show_more_link.attrs}")
+                            logger.info(f"Show more link attributes: {show_more_link.attrs}")
                 else:
                     load_more_url = None
                     if load_more_clicks >= max_load_more_clicks:
