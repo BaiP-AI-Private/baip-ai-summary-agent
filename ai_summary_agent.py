@@ -67,7 +67,6 @@ class TwitterScraper:
             "https://nitter.woodland.cafe",
             "https://nitter.weiler.rocks"
         ]
-        self.current_instance = None
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -88,33 +87,25 @@ class TwitterScraper:
         self.session.timeout = 30
         self.tried_instances = set()
         
-    def check_instance_availability(self, instance):
-        """Check if a Nitter instance is available"""
-        try:
-            response = self.session.get(
-                f"{instance}/OpenAI",
-                timeout=5,
-                verify=False,
-                allow_redirects=True
-            )
-            if response.status_code == 200:
-                # Check if the response actually contains tweet content
-                soup = BeautifulSoup(response.text, 'html.parser')
-                tweet_containers = soup.find_all('div', class_='tweet-content')
-                return len(tweet_containers) > 0
-            return False
-        except:
-            return False
-
-    def get_available_instances(self):
-        """Get list of available Nitter instances"""
-        available = []
-        for instance in self.available_instances:
-            if self.check_instance_availability(instance):
-                available.append(instance)
-                logger.info(f"Found available Nitter instance: {instance}")
-        return available
+        # Initialize with a working instance
+        self.current_instance = self.get_working_instance()
+        if not self.current_instance:
+            raise Exception("No working Nitter instances found")
+        logger.info(f"Using Nitter instance: {self.current_instance}")
     
+    def get_working_instance(self):
+        """Get a working Nitter instance"""
+        for instance in self.available_instances:
+            try:
+                response = self.session.get(f"{instance}/OpenAI", timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"Found working Nitter instance: {instance}")
+                    return instance
+            except Exception as e:
+                logger.debug(f"Instance {instance} not working: {e}")
+                continue
+        return None
+
     def get_user_tweets(self, username, start_date, end_date):
         """Get tweets from a user within date range"""
         tweets = []
@@ -123,6 +114,13 @@ class TwitterScraper:
         
         while page <= max_pages:
             try:
+                # Ensure we have a working instance
+                if not self.current_instance:
+                    self.current_instance = self.get_working_instance()
+                    if not self.current_instance:
+                        logger.error("No working Nitter instances available")
+                        break
+                
                 # Construct URL with proper path
                 url = f"{self.current_instance}/{username}"
                 if page > 1:
@@ -133,7 +131,11 @@ class TwitterScraper:
                 response = self.session.get(url, timeout=30)
                 if response.status_code != 200:
                     logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
-                    break
+                    # Try another instance
+                    self.current_instance = self.get_working_instance()
+                    if not self.current_instance:
+                        break
+                    continue
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 tweet_containers = soup.find_all('div', class_='timeline-item')
@@ -192,7 +194,11 @@ class TwitterScraper:
                 
             except Exception as e:
                 logger.error(f"Error fetching tweets for {username}: {e}")
-                break
+                # Try another instance
+                self.current_instance = self.get_working_instance()
+                if not self.current_instance:
+                    break
+                continue
         
         logger.info(f"Found {len(tweets)} tweets for {username}")
         if not tweets:
