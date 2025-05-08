@@ -266,10 +266,11 @@ class TwitterScraper:
                         cursor = show_more_link['href']
                         logger.info(f"Found cursor in href: {cursor}")
                         
+                        # Extract cursor parameter from href
                         if cursor.startswith('?'):
-                            load_more_url = f"{base_url}{cursor}"
-                        else:
-                            load_more_url = f"{base_url}?{cursor}"
+                            # Remove the leading '?' if present
+                            cursor = cursor[1:]
+                        load_more_url = f"{base_url}?{cursor}"
                         logger.info(f"Constructed load more URL: {load_more_url}")
                         
                         if load_more_clicks < max_load_more_clicks:
