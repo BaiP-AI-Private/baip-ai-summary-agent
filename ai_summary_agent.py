@@ -20,20 +20,21 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Configuration
-AI_ACCOUNTS = [
-    "OpenAI",
-    "xai",
-    "AnthropicAI",
-    "GoogleDeepMind",
-    "MistralAI",
-    "AIatMeta",
-    "Cohere",
-    "perplexity_ai",
-    "scale_ai",
-    "runwayml",
-    "dair_ai"
-]
+# AI_ACCOUNTS = [
+#     "OpenAI",
+#     "xai",
+#     "AnthropicAI",
+#     "GoogleDeepMind",
+#     "MistralAI",
+#     "AIatMeta",
+#     "Cohere",
+#     "perplexity_ai",
+#     "scale_ai",
+#     "runwayml",
+#     "dair_ai"
+# ]
 # AI_ACCOUNTS = ["elonmusk"]
+AI_ACCOUNTS = ["OpenAI"]
 
 # List of Nitter instances (updated with more reliable ones)
 NITTER_INSTANCES = [
