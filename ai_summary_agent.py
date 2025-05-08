@@ -187,31 +187,15 @@ class TwitterScraper:
 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Debug: Print the HTML to see what we're getting
-                logger.debug(f"Page HTML: {soup.prettify()[:1000]}")  # Print first 1000 chars for debugging
-                
-                # Debug: Print all div classes to see what's available
-                all_divs = soup.find_all('div', class_=True)
-                logger.debug("Found divs with classes:")
-                for div in all_divs:
-                    logger.debug(f"Div class: {div.get('class')}")
-                
                 # Find all tweet containers first
                 tweet_containers = soup.find_all('div', class_='timeline-item')
-                logger.debug(f"Found {len(tweet_containers)} timeline-item containers")
-                
                 if not tweet_containers:
                     tweet_containers = soup.find_all('div', class_='thread-line')
-                    logger.debug(f"Found {len(tweet_containers)} thread-line containers")
-                    
                     if not tweet_containers:
                         # Try alternative class names
                         tweet_containers = soup.find_all('div', class_='tweet-body')
-                        logger.debug(f"Found {len(tweet_containers)} tweet-body containers")
-                        
                         if not tweet_containers:
                             tweet_containers = soup.find_all('div', class_='tweet')
-                            logger.debug(f"Found {len(tweet_containers)} tweet containers")
 
                 if tweet_containers:
                     logger.info(f"Found {len(tweet_containers)} tweet containers")
@@ -270,23 +254,16 @@ class TwitterScraper:
                     logger.warning(f"No tweets found for {username} on this page.")
 
                 # Find the "show-more" button and get its URL
-                show_more = soup.find('div', class_='show-more')
-                logger.debug(f"Show more div found: {show_more}")
-                
+                show_more = soup.select_one('div.show-more')
                 if show_more:
                     show_more_link = show_more.find('a')
-                    logger.debug(f"Show more link found: {show_more_link}")
-                    
                     if show_more_link and 'href' in show_more_link.attrs:
                         cursor = show_more_link['href']
-                        logger.debug(f"Found cursor: {cursor}")
-                        
                         if cursor.startswith('?'):
                             load_more_url = f"{base_url}{cursor}"
                         else:
                             load_more_url = f"{base_url}?{cursor}"
                         logger.info(f"Found 'show-more' URL with cursor: {load_more_url}")
-                        
                         if load_more_clicks < max_load_more_clicks:
                             load_more_clicks += 1
                             logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
