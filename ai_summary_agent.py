@@ -106,6 +106,11 @@ class TwitterScraper:
                         continue
                 
                 response = self.session.get(f"{instance}/OpenAI", timeout=10)
+                # Check if we're redirected to health check page
+                if "status.d420.de" in response.url:
+                    logger.warning(f"Instance {instance} redirected to health check page, skipping")
+                    continue
+                    
                 if response.status_code == 200:
                     logger.info(f"Found working Nitter instance: {instance}")
                     return instance
@@ -144,12 +149,9 @@ class TwitterScraper:
                 logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
                 
                 response = self.session.get(url, timeout=30)
-                if response.status_code == 429:
-                    logger.warning(f"Rate limited by {self.current_instance}")
-                    # Set cooldown for current instance (2.5 minutes)
-                    cooldown = datetime.now() + timedelta(seconds=150)
-                    self.instance_retry_delays[self.current_instance] = cooldown
-                    # Try another instance
+                # Check if we're redirected to health check page
+                if "status.d420.de" in response.url:
+                    logger.warning(f"Instance {self.current_instance} redirected to health check page, trying another instance")
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
@@ -157,8 +159,12 @@ class TwitterScraper:
                         continue
                     time.sleep(5)  # Wait before trying new instance
                     continue
-                elif response.status_code != 200:
-                    logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
+                    
+                if response.status_code == 429:
+                    logger.warning(f"Rate limited by {self.current_instance}")
+                    # Set cooldown for current instance (1.5 minutes)
+                    cooldown = datetime.now() + timedelta(seconds=90)
+                    self.instance_retry_delays[self.current_instance] = cooldown
                     # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
