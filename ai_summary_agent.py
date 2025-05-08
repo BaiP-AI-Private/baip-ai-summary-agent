@@ -9,7 +9,7 @@ import time
 import random
 import logging
 from bs4 import BeautifulSoup
-import pytz  # Added missing import
+import pytz
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -235,26 +235,26 @@ class TwitterScraper:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
 
-            # Find the "Load more" button and get its URL
-            load_more_button = soup.find('a', class_='load-more')
-            if load_more_button and 'href' in load_more_button.attrs:
-                load_more_url = f"{self.current_instance}{load_more_button['href']}"
-                logger.info(f"Found 'Load more' URL: {load_more_url}")
-            else:
-                load_more_url = None  # Reset the URL
-                logger.info("No 'Load more' button found, assuming last page")
-                break
+                # Find the "Load more" button and get its URL
+                load_more_button = soup.find('a', class_='load-more')
+                if load_more_button and 'href' in load_more_button.attrs:
+                    load_more_url = f"{self.current_instance}{load_more_button['href']}"
+                    logger.info(f"Found 'Load more' URL: {load_more_url}")
+                else:
+                    load_more_url = None  # Reset the URL
+                    logger.info("No 'Load more' button found, assuming last page")
+                    break
 
-            time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
+                time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
 
-        except Exception as e:
-            logger.error(f"Error fetching tweets for {username}: {e}")
-            retry_count += 1
-            if retry_count >= max_retries:
-                logger.error(f"Max retries reached for {username}")
-                break
-            time.sleep(30 * (2 ** retry_count))  # Exponential backoff
-            continue
+            except Exception as e:
+                logger.error(f"Error fetching tweets for {username}: {e}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Max retries reached for {username}")
+                    break
+                time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                continue
 
         logger.info(f"Found {len(tweets)} tweets for {username}")
         if not tweets:
