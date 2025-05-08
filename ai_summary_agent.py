@@ -138,9 +138,8 @@ class TwitterScraper:
                     time.sleep(5)  # Wait before trying new instance
                 
                 # Construct URL with proper path
-                url = f"{self.current_instance}/{username}"
-                if page > 1:
-                    url += f"?page={page}"
+                base_url = f"{self.current_instance}/{username}"
+                url = f"{base_url}?page={page}" if page > 1 else base_url
                 
                 logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
                 
@@ -237,8 +236,7 @@ class TwitterScraper:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
                 
-                # Always increment page if we found tweet containers
-                # Only stop if we found less than 20 containers (indicating last page)
+                # Check if we need to continue to next page
                 if len(tweet_containers) < 20:
                     logger.info(f"Found less than 20 tweets on page {page}, assuming last page")
                     break
