@@ -34,13 +34,6 @@ AI_ACCOUNTS = [
     "dair_ai"
 ]
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-]
-
 # List of Nitter instances (updated with more reliable ones)
 NITTER_INSTANCES = [
     "https://nitter.net",
@@ -52,7 +45,12 @@ NITTER_INSTANCES = [
     "https://nitter.moomoo.me",
     "https://nitter.1d4.us",
     "https://nitter.kavin.rocks",
-    "https://nitter.unixfox.eu"
+    "https://nitter.unixfox.eu",
+    "https://nitter.42l.fr",
+    "https://nitter.nixnet.services",
+    "https://nitter.fdn.fr",
+    "https://nitter.40two.app",
+    "https://nitter.mint.lgbt"
 ]
 
 class TwitterScraper:
@@ -68,9 +66,17 @@ class TwitterScraper:
         
     def setup_session(self):
         """Initialize session with headers"""
+        # Random modern browser headers
+        user_agent = random.choice([
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        ])
+        
         self.session.headers.update({
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
@@ -79,7 +85,9 @@ class TwitterScraper:
             "Sec-Fetch-Mode": "navigate",
             "Sec-Fetch-Site": "none",
             "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0"
+            "Cache-Control": "max-age=0",
+            "DNT": "1",
+            "Pragma": "no-cache"
         })
         return True
 
@@ -92,7 +100,12 @@ class TwitterScraper:
                 verify=False,
                 allow_redirects=True
             )
-            return response.status_code == 200
+            if response.status_code == 200:
+                # Check if the response actually contains tweet content
+                soup = BeautifulSoup(response.text, 'html.parser')
+                tweet_containers = soup.find_all('div', class_='tweet-content')
+                return len(tweet_containers) > 0
+            return False
         except:
             return False
 
@@ -192,7 +205,7 @@ class TwitterScraper:
                             continue
                     
                     page += 1
-                    time.sleep(random.uniform(2, 4))  # Increased rate limiting
+                    time.sleep(random.uniform(2, 4))  # Rate limiting
                 else:
                     logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
                     self.tried_instances.add(self.current_instance)
@@ -321,7 +334,7 @@ def main():
             else:
                 logger.warning(f"No tweets found for {account} in the last 24 hours")
             
-            time.sleep(random.uniform(3, 5))  # Increased rate limiting
+            time.sleep(random.uniform(3, 5))  # Rate limiting
         
         if not all_tweets:
             logger.warning("No tweets found from any account in the last 24 hours")
