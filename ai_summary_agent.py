@@ -127,13 +127,12 @@ class TwitterScraper:
     def get_user_tweets(self, username, start_date, end_date):
         """Get tweets from a user within date range"""
         tweets = []
-        page = 1
-        max_pages = 10  # Limit to 10 pages per account
         retry_count = 0
         max_retries = 3
         last_working_instance = None
+        load_more_url = None  # URL for loading more tweets
 
-        while page <= max_pages and retry_count < max_retries:
+        while retry_count < max_retries:
             try:
                 # Use last working instance if available and not in cooldown
                 if last_working_instance and last_working_instance not in self.instance_retry_delays:
@@ -146,12 +145,9 @@ class TwitterScraper:
                         break
                     time.sleep(5)  # Wait before trying new instance
 
-                # Construct URL with proper path
-                base_url = f"{self.current_instance}/{username}"
-                # Only include page parameter for pages after page 1
-                url = f"{base_url}?page={page}" if page > 1 else base_url
-
-                logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
+                # Construct the initial URL or use the "Load more" URL
+                url = load_more_url if load_more_url else f"{self.current_instance}/{username}"
+                logger.info(f"Fetching from URL: {url}")
 
                 response = self.session.get(url, timeout=30)
                 # Check if we're redirected to health check page
@@ -197,24 +193,10 @@ class TwitterScraper:
                 tweet_containers = soup.find_all('div', class_='timeline-item')
 
                 if not tweet_containers:
-                    logger.warning(f"No tweets found on page {page} for {username}")
-                    # If we're on page 1 and no tweets found, try another instance
-                    if page == 1:
-                        self.current_instance = self.get_working_instance()
-                        if not self.current_instance:
-                            retry_count += 1
-                            time.sleep(30 * (2 ** retry_count))  # Exponential backoff
-                            continue
-                        time.sleep(5)  # Wait before trying new instance
-                        continue
-                    else:
-                        # Move to next page even if no tweets found
-                        page += 1
-                        logger.info(f"No tweets found on page {page-1}, moving to page {page}")
-                        time.sleep(random.uniform(5, 10))  # Increased delay between pages
-                        continue
+                    logger.warning(f"No tweets found for {username}")
+                    break
 
-                logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
+                logger.info(f"Found {len(tweet_containers)} tweet containers")
 
                 found_tweets_in_range = False
                 for container in tweet_containers:
@@ -262,26 +244,26 @@ class TwitterScraper:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
 
-                # Check if we need to continue to next page
-                if len(tweet_containers) < 20:
-                    logger.info(f"Found less than 20 tweets on page {page}, assuming last page")
-                    break
+            # Find the "Load more" button and get its URL
+            load_more_button = soup.find('a', class_='load-more')
+            if load_more_button and 'href' in load_more_button.attrs:
+                load_more_url = f"{self.current_instance}{load_more_button['href']}"
+                logger.info(f"Found 'Load more' URL: {load_more_url}")
+            else:
+                logger.info("No 'Load more' button found, assuming last page")
+                break
 
-                # Move to next page and continue the loop
-                page += 1
-                logger.info(f"Successfully processed page {page-1}, moving to page {page}")
-                time.sleep(random.uniform(5, 10))  # Increased delay between pages
-                continue  # Explicitly continue to next iteration
+            time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
 
-            except Exception as e:
-                logger.error(f"Error fetching tweets for {username}: {e}")
-                retry_count += 1
-                if retry_count >= max_retries:
-                    logger.error(f"Max retries reached for {username}")
-                    break
-                time.sleep(30 * (2 ** retry_count))  # Exponential backoff
-                continue
-        
+        except Exception as e:
+            logger.error(f"Error fetching tweets for {username}: {e}")
+            retry_count += 1
+            if retry_count >= max_retries:
+                logger.error(f"Max retries reached for {username}")
+                break
+            time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+            continue
+
         logger.info(f"Found {len(tweets)} tweets for {username}")
         if not tweets:
             logger.warning(f"No tweets found for {username} in the last 24 hours")
