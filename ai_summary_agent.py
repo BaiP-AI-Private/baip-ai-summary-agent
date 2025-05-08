@@ -148,6 +148,7 @@ class TwitterScraper:
                 
                 # Construct URL with proper path
                 base_url = f"{self.current_instance}/{username}"
+                # Only include page parameter for pages after page 1
                 url = f"{base_url}?page={page}" if page > 1 else base_url
                 
                 logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
