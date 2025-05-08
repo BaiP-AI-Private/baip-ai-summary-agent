@@ -122,6 +122,8 @@ class TwitterScraper:
         max_retries = 3
         last_working_instance = None
         load_more_url = None  # URL for loading more tweets
+        load_more_clicks = 0  # Track number of load more clicks
+        max_load_more_clicks = 5  # Maximum number of load more clicks to simulate
 
         while retry_count < max_retries:
             try:
@@ -180,6 +182,23 @@ class TwitterScraper:
                 last_working_instance = self.current_instance
 
                 soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Find the "Load more" button and get its URL
+                load_more_button = soup.find('a', class_='load-more')
+                if load_more_button and 'href' in load_more_button.attrs and load_more_clicks < max_load_more_clicks:
+                    load_more_url = f"{self.current_instance}{load_more_button['href']}"
+                    logger.info(f"Found 'Load more' URL: {load_more_url}")
+                    load_more_clicks += 1
+                    logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
+                    time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
+                    continue
+                else:
+                    load_more_url = None  # Reset the URL
+                    if load_more_clicks >= max_load_more_clicks:
+                        logger.info(f"Reached maximum load more clicks ({max_load_more_clicks})")
+                    else:
+                        logger.info("No 'Load more' button found, assuming last page")
+
                 # Find all tweet containers
                 tweet_containers = soup.find_all('div', class_='timeline-item')
 
@@ -235,17 +254,9 @@ class TwitterScraper:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
 
-                # Find the "Load more" button and get its URL
-                load_more_button = soup.find('a', class_='load-more')
-                if load_more_button and 'href' in load_more_button.attrs:
-                    load_more_url = f"{self.current_instance}{load_more_button['href']}"
-                    logger.info(f"Found 'Load more' URL: {load_more_url}")
-                else:
-                    load_more_url = None  # Reset the URL
-                    logger.info("No 'Load more' button found, assuming last page")
+                # If we've processed all tweets and haven't found any in range, break
+                if not found_tweets_in_range and not load_more_url:
                     break
-
-                time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
 
             except Exception as e:
                 logger.error(f"Error fetching tweets for {username}: {e}")
