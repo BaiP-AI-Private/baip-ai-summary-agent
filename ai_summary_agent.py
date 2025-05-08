@@ -184,22 +184,28 @@ class TwitterScraper:
 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Find the "Load more" button and get its URL
-                # The load more button can have different class names, so we check for both
-                load_more_button = soup.select_one('div.show-more a') or soup.find('a', class_='more-replies')
-                if load_more_button and 'href' in load_more_button.attrs and load_more_clicks < max_load_more_clicks:
-                    load_more_url = f"{self.current_instance}{load_more_button['href']}"
-                    logger.info(f"Found 'Load more' URL: {load_more_url}")
-                    load_more_clicks += 1
-                    logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
-                    time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
-                    continue
-                else:
-                    load_more_url = None  # Reset the URL
-                    if load_more_clicks >= max_load_more_clicks:
-                        logger.info(f"Reached maximum load more clicks ({max_load_more_clicks})")
+                # Find the "show-more" class and get the href
+                show_more_class = soup.select_one('div.show-more a') or soup.find('a', class_='more-replies')
+                if show_more_class:
+                    logger.debug(f"Show more element found: {show_more_class}")
+                    if 'href' in show_more_class.attrs:
+                        load_more_url = f"{self.current_instance}{show_more_class['href']}"
+                        logger.info(f"Found 'show-more' URL: {load_more_url}")
+                        if load_more_clicks < max_load_more_clicks:
+                            load_more_clicks += 1
+                            logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
+                            time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
+                            continue
                     else:
-                        logger.info("No 'Load more' button found, assuming last page")
+                        logger.warning("Show more element found but missing href attribute")
+                        logger.debug(f"Show more element attributes: {show_more_class.attrs}")
+                
+                # Reset URL if we get here (no valid show more or max clicks reached)
+                load_more_url = None
+                if load_more_clicks >= max_load_more_clicks:
+                    logger.info(f"Reached maximum load more clicks ({max_load_more_clicks})")
+                else:
+                    logger.info("No 'show-more' button found, assuming last page")
 
                 # Find all tweet containers - check for both timeline-item and thread-line classes
                 tweet_containers = soup.find_all('div', class_='timeline-item') or soup.find_all('div', class_='thread-line')
