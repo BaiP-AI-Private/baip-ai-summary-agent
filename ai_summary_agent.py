@@ -20,20 +20,21 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Configuration
-AI_ACCOUNTS = [
-    "OpenAI",
-    "xai",
-    "AnthropicAI",
-    "GoogleDeepMind",
-    "MistralAI",
-    "AIatMeta",
-    "Cohere",
-    "perplexity_ai",
-    "scale_ai",
-    "runwayml",
-    "dair_ai"
-]
+# AI_ACCOUNTS = [
+#     "OpenAI",
+#     "xai",
+#     "AnthropicAI",
+#     "GoogleDeepMind",
+#     "MistralAI",
+#     "AIatMeta",
+#     "Cohere",
+#     "perplexity_ai",
+#     "scale_ai",
+#     "runwayml",
+#     "dair_ai"
+# ]
 # AI_ACCOUNTS = ["elonmusk"]
+AI_ACCOUNTS = ["OpenAI"]
 
 # List of Nitter instances (updated with more reliable ones)
 NITTER_INSTANCES = [
@@ -122,9 +123,10 @@ class TwitterScraper:
         retry_count = 0
         max_retries = 3
         last_working_instance = None
-        load_more_url = None  # URL for loading more tweets
-        load_more_clicks = 0  # Track number of load more clicks
-        max_load_more_clicks = 5  # Maximum number of load more clicks to simulate
+        load_more_url = None
+        load_more_clicks = 0
+        max_load_more_clicks = 5
+        found_tweets_in_range = False
 
         while retry_count < max_retries:
             try:
@@ -132,134 +134,142 @@ class TwitterScraper:
                 if last_working_instance and last_working_instance not in self.instance_retry_delays:
                     self.current_instance = last_working_instance
                 else:
-                    # Get a new instance only if needed
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         logger.error("No working Nitter instances available")
                         break
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
 
                 # Construct the initial URL or use the "Load more" URL
-                url = load_more_url if load_more_url else f"{self.current_instance}/{username}"
+                base_url = f"{self.current_instance}/{username}"
+                url = load_more_url if load_more_url else base_url
                 logger.info(f"Fetching from URL: {url}")
 
                 response = self.session.get(url, timeout=30)
+                
                 # Check if we're redirected to health check page
                 if "status.d420.de" in response.url:
                     logger.warning(f"Instance {self.current_instance} redirected to health check page, trying another instance")
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        time.sleep(30 * (2 ** retry_count))
                         continue
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
                     continue
 
                 if response.status_code == 429:
                     logger.warning(f"Rate limited by {self.current_instance}")
-                    # Set cooldown for current instance (1.5 minutes)
                     cooldown = datetime.now() + timedelta(seconds=90)
                     self.instance_retry_delays[self.current_instance] = cooldown
-                    # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        time.sleep(30 * (2 ** retry_count))
                         continue
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
                     continue
                 elif response.status_code != 200:
                     logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
-                    # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        time.sleep(30 * (2 ** retry_count))
                         continue
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
                     continue
 
-                # If we get here, the instance is working
                 last_working_instance = self.current_instance
-
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Find the "Load more" button and get its URL
-                # The load more button can have different class names, so we check for both
-                load_more_button = soup.select_one('div.show-more a') or soup.find('a', class_='more-replies')
-                if load_more_button and 'href' in load_more_button.attrs and load_more_clicks < max_load_more_clicks:
-                    load_more_url = f"{self.current_instance}{load_more_button['href']}"
-                    logger.info(f"Found 'Load more' URL: {load_more_url}")
-                    load_more_clicks += 1
-                    logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
-                    time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
-                    continue
+                # Find all tweet containers
+                tweet_containers = soup.find_all('div', class_='timeline-item')
+                if not tweet_containers:
+                    logger.warning(f"No tweets found for {username} on this page.")
                 else:
-                    load_more_url = None  # Reset the URL
+                    logger.info(f"Found {len(tweet_containers)} tweet containers")
+                    
+                    for container in tweet_containers:
+                        try:
+                            # Find tweet text
+                            tweet_text_div = container.find('div', class_='tweet-content')
+                            if not tweet_text_div:
+                                continue
+
+                            # Find tweet date
+                            date_element = container.find('span', class_='tweet-date')
+                            if not date_element:
+                                continue
+
+                            # Get the date from the title attribute of the link
+                            date_link = date_element.find('a')
+                            if not date_link or 'title' not in date_link.attrs:
+                                continue
+
+                            date_str = date_link['title']
+                            logger.debug(f"Found tweet date: {date_str}")
+
+                            # Parse date
+                            try:
+                                tweet_date = datetime.strptime(date_str, '%b %d, %Y · %I:%M %p UTC')
+                                tweet_date = pytz.UTC.localize(tweet_date)
+                            except ValueError:
+                                try:
+                                    tweet_date = datetime.strptime(date_str, '%b %d, %Y · %H:%M UTC')
+                                    tweet_date = pytz.UTC.localize(tweet_date)
+                                except ValueError:
+                                    logger.warning(f"Could not parse date: {date_str}")
+                                    continue
+
+                            # Check if tweet is within date range
+                            if start_date <= tweet_date <= end_date:
+                                tweet_text = tweet_text_div.get_text(strip=True)
+                                tweets.append(f"@{username}: {tweet_text}")
+                                logger.info(f"Found tweet from {username} at {tweet_date}")
+                                found_tweets_in_range = True
+                            else:
+                                logger.debug(f"Tweet from {tweet_date} outside date range {start_date} to {end_date}")
+
+                        except Exception as e:
+                            logger.error(f"Error parsing tweet: {e}")
+                            continue
+
+                # Find the "show-more" button and get its URL
+                logger.info("Looking for show-more button...")
+                show_more = soup.find('div', class_='show-more')
+                logger.info(f"Show more div found: {show_more}")
+                
+                if show_more:
+                    show_more_link = show_more.find('a')
+                    logger.info(f"Show more link found: {show_more_link}")
+                    
+                    if show_more_link and 'href' in show_more_link.attrs:
+                        cursor = show_more_link['href']
+                        logger.info(f"Found cursor in href: {cursor}")
+                        
+                        # Extract cursor parameter from href
+                        if cursor.startswith('?'):
+                            cursor = cursor[1:]
+                        load_more_url = f"{base_url}?{cursor}"
+                        logger.info(f"Constructed load more URL: {load_more_url}")
+                        
+                        if load_more_clicks < max_load_more_clicks:
+                            load_more_clicks += 1
+                            logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
+                            time.sleep(random.uniform(5, 10))
+                            continue
+                    else:
+                        logger.warning("Show more element found but missing href attribute")
+                        if show_more_link:
+                            logger.info(f"Show more link attributes: {show_more_link.attrs}")
+                else:
+                    load_more_url = None
                     if load_more_clicks >= max_load_more_clicks:
                         logger.info(f"Reached maximum load more clicks ({max_load_more_clicks})")
                     else:
-                        logger.info("No 'Load more' button found, assuming last page")
+                        logger.info("No 'show-more' button found, assuming last page")
 
-                # Find all tweet containers - check for both timeline-item and thread-line classes
-                tweet_containers = soup.find_all('div', class_='timeline-item') or soup.find_all('div', class_='thread-line')
-
-                if not tweet_containers:
-                    logger.warning(f"No tweets found for {username} on this page.")
-                    if load_more_clicks < max_load_more_clicks and load_more_url:
-                        logger.info("Trying to load more tweets...")
-                        continue
-                    break
-
-                logger.info(f"Found {len(tweet_containers)} tweet containers")
-
-                found_tweets_in_range = False
-                for container in tweet_containers:
-                    try:
-                        # Find tweet text - look for the tweet-content div
-                        tweet_text_div = container.find('div', class_='tweet-content')
-                        if not tweet_text_div:
-                            continue
-
-                        # Find tweet date - look for the tweet-date span
-                        date_element = container.find('span', class_='tweet-date')
-                        if not date_element:
-                            continue
-
-                        # Get the date from the title attribute of the link
-                        date_link = date_element.find('a')
-                        if not date_link or 'title' not in date_link.attrs:
-                            continue
-
-                        date_str = date_link['title']
-                        logger.debug(f"Found tweet date: {date_str}")
-
-                        # Parse date
-                        try:
-                            tweet_date = datetime.strptime(date_str, '%b %d, %Y · %I:%M %p UTC')
-                            tweet_date = pytz.UTC.localize(tweet_date)
-                        except ValueError:
-                            try:
-                                tweet_date = datetime.strptime(date_str, '%b %d, %Y · %H:%M UTC')
-                                tweet_date = pytz.UTC.localize(tweet_date)
-                            except ValueError:
-                                logger.warning(f"Could not parse date: {date_str}")
-                                continue
-
-                        # Check if tweet is within date range
-                        if start_date <= tweet_date <= end_date:
-                            tweet_text = tweet_text_div.get_text(strip=True)
-                            tweets.append(f"@{username}: {tweet_text}")
-                            logger.info(f"Found tweet from {username} at {tweet_date}")
-                            found_tweets_in_range = True
-                        else:
-                            logger.debug(f"Tweet from {tweet_date} outside date range {start_date} to {end_date}")
-
-                    except Exception as e:
-                        logger.error(f"Error parsing tweet: {e}")
-                        continue
-
-                # If we've processed all tweets and haven't found any in range, break
+                # If we've processed all tweets and haven't found any in range, and there's no more content, break
                 if not found_tweets_in_range and not load_more_url:
                     break
 
@@ -269,7 +279,7 @@ class TwitterScraper:
                 if retry_count >= max_retries:
                     logger.error(f"Max retries reached for {username}")
                     break
-                time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                time.sleep(30 * (2 ** retry_count))
                 continue
 
         logger.info(f"Found {len(tweets)} tweets for {username}")
