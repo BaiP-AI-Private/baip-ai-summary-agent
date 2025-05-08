@@ -86,6 +86,7 @@ class TwitterScraper:
         self.session.allow_redirects = True
         self.session.timeout = 30
         self.tried_instances = set()
+        self.instance_retry_delays = {}  # Track retry delays for each instance
         
         # Initialize with a working instance
         self.current_instance = self.get_working_instance()
@@ -97,10 +98,22 @@ class TwitterScraper:
         """Get a working Nitter instance"""
         for instance in self.available_instances:
             try:
+                # Check if instance is in cooldown
+                if instance in self.instance_retry_delays:
+                    delay = self.instance_retry_delays[instance]
+                    if datetime.now() < delay:
+                        logger.debug(f"Instance {instance} in cooldown until {delay}")
+                        continue
+                
                 response = self.session.get(f"{instance}/OpenAI", timeout=10)
                 if response.status_code == 200:
                     logger.info(f"Found working Nitter instance: {instance}")
                     return instance
+                elif response.status_code == 429:
+                    # Set cooldown for rate-limited instance
+                    cooldown = datetime.now() + timedelta(minutes=5)
+                    self.instance_retry_delays[instance] = cooldown
+                    logger.warning(f"Instance {instance} rate limited, cooling down until {cooldown}")
             except Exception as e:
                 logger.debug(f"Instance {instance} not working: {e}")
                 continue
@@ -111,8 +124,10 @@ class TwitterScraper:
         tweets = []
         page = 1
         max_pages = 10  # Limit to 10 pages per account
+        retry_count = 0
+        max_retries = 3
         
-        while page <= max_pages:
+        while page <= max_pages and retry_count < max_retries:
             try:
                 # Ensure we have a working instance
                 if not self.current_instance:
@@ -120,6 +135,7 @@ class TwitterScraper:
                     if not self.current_instance:
                         logger.error("No working Nitter instances available")
                         break
+                    time.sleep(5)  # Wait before trying new instance
                 
                 # Construct URL with proper path
                 url = f"{self.current_instance}/{username}"
@@ -129,12 +145,28 @@ class TwitterScraper:
                 logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
                 
                 response = self.session.get(url, timeout=30)
-                if response.status_code != 200:
+                if response.status_code == 429:
+                    logger.warning(f"Rate limited by {self.current_instance}")
+                    # Set cooldown for current instance
+                    cooldown = datetime.now() + timedelta(minutes=5)
+                    self.instance_retry_delays[self.current_instance] = cooldown
+                    # Try another instance
+                    self.current_instance = self.get_working_instance()
+                    if not self.current_instance:
+                        retry_count += 1
+                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        continue
+                    time.sleep(5)  # Wait before trying new instance
+                    continue
+                elif response.status_code != 200:
                     logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
                     # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
-                        break
+                        retry_count += 1
+                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        continue
+                    time.sleep(5)  # Wait before trying new instance
                     continue
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -146,7 +178,10 @@ class TwitterScraper:
                     # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
-                        break
+                        retry_count += 1
+                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        continue
+                    time.sleep(5)  # Wait before trying new instance
                     continue
                 
                 logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
@@ -202,14 +237,15 @@ class TwitterScraper:
                     break
                     
                 page += 1
-                time.sleep(random.uniform(2, 4))  # Random delay between pages
+                time.sleep(random.uniform(5, 10))  # Increased delay between pages
                 
             except Exception as e:
                 logger.error(f"Error fetching tweets for {username}: {e}")
-                # Try another instance
-                self.current_instance = self.get_working_instance()
-                if not self.current_instance:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Max retries reached for {username}")
                     break
+                time.sleep(30 * (2 ** retry_count))  # Exponential backoff
                 continue
         
         logger.info(f"Found {len(tweets)} tweets for {username}")
