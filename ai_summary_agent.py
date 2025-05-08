@@ -175,17 +175,24 @@ class TwitterScraper:
                 
                 if not tweet_containers:
                     logger.warning(f"No tweets found on page {page} for {username}")
-                    # Try another instance
-                    self.current_instance = self.get_working_instance()
-                    if not self.current_instance:
-                        retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                    # Check if we've reached the end of the timeline
+                    if page == 1:
+                        # On first page, try another instance
+                        self.current_instance = self.get_working_instance()
+                        if not self.current_instance:
+                            retry_count += 1
+                            time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                            continue
+                        time.sleep(5)  # Wait before trying new instance
                         continue
-                    time.sleep(5)  # Wait before trying new instance
-                    continue
+                    else:
+                        # On subsequent pages, assume we've reached the end
+                        logger.info(f"Reached end of timeline for {username} at page {page}")
+                        break
                 
                 logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
                 
+                found_tweets_in_range = False
                 for container in tweet_containers:
                     try:
                         # Find tweet text - look for the tweet-content div
@@ -223,6 +230,7 @@ class TwitterScraper:
                             tweet_text = tweet_text_div.get_text(strip=True)
                             tweets.append(f"@{username}: {tweet_text}")
                             logger.info(f"Found tweet from {username} at {tweet_date}")
+                            found_tweets_in_range = True
                         else:
                             logger.debug(f"Tweet from {tweet_date} outside date range {start_date} to {end_date}")
                             
@@ -230,12 +238,14 @@ class TwitterScraper:
                         logger.error(f"Error parsing tweet: {e}")
                         continue
                 
-                # Check if we need to continue to next page
-                # If we found less than 20 tweets, we're probably at the last page
+                # If we found tweets in range on this page, continue to next page
+                # If we didn't find any tweets in range but found containers, also continue
+                # Only stop if we found less than 20 containers (indicating last page)
                 if len(tweet_containers) < 20:
                     logger.info(f"Found less than 20 tweets on page {page}, assuming last page")
                     break
-                    
+                
+                # Move to next page
                 page += 1
                 time.sleep(random.uniform(5, 10))  # Increased delay between pages
                 
