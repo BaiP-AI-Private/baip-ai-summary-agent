@@ -123,10 +123,10 @@ class TwitterScraper:
         retry_count = 0
         max_retries = 3
         last_working_instance = None
-        load_more_url = None  # URL for loading more tweets
-        load_more_clicks = 0  # Track number of load more clicks
-        max_load_more_clicks = 5  # Maximum number of load more clicks to simulate
-        found_tweets_in_range = False  # Initialize at the start
+        load_more_url = None
+        load_more_clicks = 0
+        max_load_more_clicks = 5
+        found_tweets_in_range = False
 
         while retry_count < max_retries:
             try:
@@ -134,12 +134,11 @@ class TwitterScraper:
                 if last_working_instance and last_working_instance not in self.instance_retry_delays:
                     self.current_instance = last_working_instance
                 else:
-                    # Get a new instance only if needed
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         logger.error("No working Nitter instances available")
                         break
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
 
                 # Construct the initial URL or use the "Load more" URL
                 base_url = f"{self.current_instance}/{username}"
@@ -147,79 +146,63 @@ class TwitterScraper:
                 logger.info(f"Fetching from URL: {url}")
 
                 response = self.session.get(url, timeout=30)
+                
                 # Check if we're redirected to health check page
                 if "status.d420.de" in response.url:
                     logger.warning(f"Instance {self.current_instance} redirected to health check page, trying another instance")
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        time.sleep(30 * (2 ** retry_count))
                         continue
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
                     continue
 
                 if response.status_code == 429:
                     logger.warning(f"Rate limited by {self.current_instance}")
-                    # Set cooldown for current instance (1.5 minutes)
                     cooldown = datetime.now() + timedelta(seconds=90)
                     self.instance_retry_delays[self.current_instance] = cooldown
-                    # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        time.sleep(30 * (2 ** retry_count))
                         continue
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
                     continue
                 elif response.status_code != 200:
                     logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
-                    # Try another instance
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         retry_count += 1
-                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        time.sleep(30 * (2 ** retry_count))
                         continue
-                    time.sleep(5)  # Wait before trying new instance
+                    time.sleep(5)
                     continue
 
-                # If we get here, the instance is working
                 last_working_instance = self.current_instance
-
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Find all tweet containers first
+                # Find all tweet containers
                 tweet_containers = soup.find_all('div', class_='timeline-item')
                 if not tweet_containers:
-                    tweet_containers = soup.find_all('div', class_='thread-line')
-                    if not tweet_containers:
-                        # Try alternative class names
-                        tweet_containers = soup.find_all('div', class_='tweet-body')
-                        if not tweet_containers:
-                            tweet_containers = soup.find_all('div', class_='tweet')
-
-                if tweet_containers:
+                    logger.warning(f"No tweets found for {username} on this page.")
+                else:
                     logger.info(f"Found {len(tweet_containers)} tweet containers")
                     
                     for container in tweet_containers:
                         try:
-                            # Find tweet text - look for the tweet-content div
+                            # Find tweet text
                             tweet_text_div = container.find('div', class_='tweet-content')
                             if not tweet_text_div:
-                                # Try alternative class names
-                                tweet_text_div = container.find('div', class_='tweet-body')
-                                if not tweet_text_div:
-                                    continue
+                                continue
 
-                            # Find tweet date - look for the tweet-date span
+                            # Find tweet date
                             date_element = container.find('span', class_='tweet-date')
                             if not date_element:
-                                # Try alternative class names
-                                date_element = container.find('a', class_='tweet-date')
-                                if not date_element:
-                                    continue
+                                continue
 
                             # Get the date from the title attribute of the link
-                            date_link = date_element.find('a') if date_element.name != 'a' else date_element
+                            date_link = date_element.find('a')
                             if not date_link or 'title' not in date_link.attrs:
                                 continue
 
@@ -250,8 +233,6 @@ class TwitterScraper:
                         except Exception as e:
                             logger.error(f"Error parsing tweet: {e}")
                             continue
-                else:
-                    logger.warning(f"No tweets found for {username} on this page.")
 
                 # Find the "show-more" button and get its URL
                 logger.info("Looking for show-more button...")
@@ -268,7 +249,6 @@ class TwitterScraper:
                         
                         # Extract cursor parameter from href
                         if cursor.startswith('?'):
-                            # Remove the leading '?' if present
                             cursor = cursor[1:]
                         load_more_url = f"{base_url}?{cursor}"
                         logger.info(f"Constructed load more URL: {load_more_url}")
@@ -276,7 +256,7 @@ class TwitterScraper:
                         if load_more_clicks < max_load_more_clicks:
                             load_more_clicks += 1
                             logger.info(f"Simulating load more click {load_more_clicks} of {max_load_more_clicks}")
-                            time.sleep(random.uniform(5, 10))  # Delay before loading more tweets
+                            time.sleep(random.uniform(5, 10))
                             continue
                     else:
                         logger.warning("Show more element found but missing href attribute")
@@ -299,7 +279,7 @@ class TwitterScraper:
                 if retry_count >= max_retries:
                     logger.error(f"Max retries reached for {username}")
                     break
-                time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                time.sleep(30 * (2 ** retry_count))
                 continue
 
         logger.info(f"Found {len(tweets)} tweets for {username}")
