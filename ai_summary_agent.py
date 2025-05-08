@@ -205,7 +205,10 @@ class TwitterScraper:
                 tweet_containers = soup.find_all('div', class_='timeline-item') or soup.find_all('div', class_='thread-line')
 
                 if not tweet_containers:
-                    logger.warning(f"No tweets found for {username}")
+                    logger.warning(f"No tweets found for {username} on this page.")
+                    if load_more_clicks < max_load_more_clicks and load_more_url:
+                        logger.info("Trying to load more tweets...")
+                        continue
                     break
 
                 logger.info(f"Found {len(tweet_containers)} tweet containers")
