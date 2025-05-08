@@ -208,9 +208,11 @@ class TwitterScraper:
                         time.sleep(5)  # Wait before trying new instance
                         continue
                     else:
-                        # On subsequent pages, assume we've reached the end
-                        logger.info(f"Reached end of timeline for {username} at page {page}")
-                        break
+                        # Move to next page even if no tweets found
+                        page += 1
+                        logger.info(f"No tweets found on page {page-1}, moving to page {page}")
+                        time.sleep(random.uniform(5, 10))  # Increased delay between pages
+                        continue
                 
                 logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
                 
