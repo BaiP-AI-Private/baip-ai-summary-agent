@@ -55,42 +55,39 @@ NITTER_INSTANCES = [
 
 class TwitterScraper:
     def __init__(self):
+        self.available_instances = [
+            "https://nitter.net",
+            "https://nitter.1d4.us",
+            "https://nitter.kavin.rocks",
+            "https://nitter.unixfox.eu",
+            "https://nitter.moomoo.me",
+            "https://nitter.privacydev.net",
+            "https://nitter.poast.org",
+            "https://nitter.mint.lgbt",
+            "https://nitter.woodland.cafe",
+            "https://nitter.weiler.rocks"
+        ]
+        self.current_instance = None
         self.session = requests.Session()
-        self.session.verify = certifi.where()
-        self.setup_session()
-        self.available_instances = self.get_available_instances()
-        if not self.available_instances:
-            raise Exception("No available Nitter instances found")
-        self.current_instance = random.choice(self.available_instances)
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0'
+        })
+        self.session.verify = True
+        self.session.allow_redirects = True
+        self.session.timeout = 30
         self.tried_instances = set()
         
-    def setup_session(self):
-        """Initialize session with headers"""
-        # Random modern browser headers
-        user_agent = random.choice([
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-        ])
-        
-        self.session.headers.update({
-            "User-Agent": user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0",
-            "DNT": "1",
-            "Pragma": "no-cache"
-        })
-        return True
-
     def check_instance_availability(self, instance):
         """Check if a Nitter instance is available"""
         try:
@@ -112,125 +109,94 @@ class TwitterScraper:
     def get_available_instances(self):
         """Get list of available Nitter instances"""
         available = []
-        for instance in NITTER_INSTANCES:
+        for instance in self.available_instances:
             if self.check_instance_availability(instance):
                 available.append(instance)
                 logger.info(f"Found available Nitter instance: {instance}")
         return available
     
-    def get_user_tweets(self, username, start_date, end_date, limit=10):
-        """Fetch user tweets within date range"""
+    def get_user_tweets(self, username, start_date, end_date):
+        """Get tweets from a user within date range"""
         tweets = []
         page = 1
         max_pages = 10  # Limit to 10 pages per account
         
-        while len(tweets) < limit and len(self.tried_instances) < len(self.available_instances) and page <= max_pages:
+        while page <= max_pages:
             try:
+                # Construct URL with proper path
                 url = f"{self.current_instance}/{username}"
                 if page > 1:
                     url += f"?page={page}"
                 
                 logger.info(f"Fetching from URL: {url} (Page {page}/{max_pages})")
                 
-                # Try with SSL verification first
-                try:
-                    response = self.session.get(
-                        url,
-                        timeout=10,
-                        allow_redirects=True
-                    )
-                except requests.exceptions.SSLError:
-                    # If SSL verification fails, try without verification
-                    logger.warning(f"SSL verification failed for {self.current_instance}, trying without verification")
-                    response = self.session.get(
-                        url,
-                        verify=False,
-                        timeout=10,
-                        allow_redirects=True
-                    )
+                response = self.session.get(url, timeout=30)
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
+                    break
                 
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    tweet_containers = soup.find_all('div', class_='tweet-content')
-                    
-                    if not tweet_containers:
-                        logger.warning(f"No tweets found on page {page} for {username}")
-                        # Try another instance if no tweets found
-                        self.tried_instances.add(self.current_instance)
-                        remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
-                        if remaining_instances:
-                            self.current_instance = random.choice(remaining_instances)
+                soup = BeautifulSoup(response.text, 'html.parser')
+                tweet_containers = soup.find_all('div', class_='timeline-item')
+                
+                if not tweet_containers:
+                    logger.warning(f"No tweets found on page {page} for {username}")
+                    break
+                
+                logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
+                
+                for container in tweet_containers:
+                    try:
+                        # Find tweet text
+                        tweet_text = container.find('div', class_='tweet-content')
+                        if not tweet_text:
                             continue
-                        break
-                    
-                    logger.info(f"Found {len(tweet_containers)} tweet containers on page {page}")
-                    
-                    for container in tweet_containers:
+                        
+                        # Find tweet date
+                        date_element = container.find('span', class_='tweet-date')
+                        if not date_element:
+                            continue
+                            
+                        date_str = date_element.find('a')['title']
+                        logger.debug(f"Found tweet date: {date_str}")
+                        
+                        # Parse date
                         try:
-                            tweet_text = container.get_text(strip=True)
-                            tweet_time_element = container.find_previous('span', class_='tweet-date')
-                            if not tweet_time_element:
-                                logger.warning("Could not find tweet date element")
-                                continue
-                                
-                            tweet_time = tweet_time_element.find('a')['title']
-                            logger.info(f"Found tweet with time: {tweet_time}")
-                            
-                            # Try different date formats
+                            tweet_date = datetime.strptime(date_str, '%b %d, %Y · %I:%M %p UTC')
+                            tweet_date = pytz.UTC.localize(tweet_date)
+                        except ValueError:
                             try:
-                                tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %I:%M %p UTC')
-                            except ValueError:
-                                try:
-                                    tweet_date = datetime.strptime(tweet_time, '%b %d, %Y · %H:%M UTC')
-                                except ValueError:
-                                    logger.warning(f"Could not parse tweet date: {tweet_time}")
-                                    continue
-                            
-                            # Convert to UTC if not already
-                            if tweet_date.tzinfo is None:
+                                tweet_date = datetime.strptime(date_str, '%b %d, %Y · %H:%M UTC')
                                 tweet_date = pytz.UTC.localize(tweet_date)
+                            except ValueError:
+                                logger.warning(f"Could not parse date: {date_str}")
+                                continue
+                        
+                        # Check if tweet is within date range
+                        if start_date <= tweet_date <= end_date:
+                            tweet_text = tweet_text.get_text(strip=True)
+                            tweets.append(f"@{username}: {tweet_text}")
+                            logger.info(f"Found tweet from {username} at {tweet_date}")
+                        else:
+                            logger.debug(f"Tweet from {tweet_date} outside date range")
                             
-                            logger.info(f"Parsed tweet date: {tweet_date}")
-                            logger.info(f"Date range: {start_date} to {end_date}")
-                            
-                            if start_date <= tweet_date <= end_date:
-                                tweets.append(tweet_text)
-                                logger.info(f"Added tweet: {tweet_text[:50]}...")
-                                if len(tweets) >= limit:
-                                    break
-                            else:
-                                logger.info(f"Tweet date {tweet_date} outside range {start_date} to {end_date}")
-                                
-                        except Exception as e:
-                            logger.warning(f"Error parsing tweet: {e}")
-                            continue
-                    
-                    page += 1
-                    time.sleep(random.uniform(2, 4))  # Rate limiting
-                else:
-                    logger.error(f"Failed to fetch tweets for {username}: Status {response.status_code}")
-                    self.tried_instances.add(self.current_instance)
-                    remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
-                    if remaining_instances:
-                        self.current_instance = random.choice(remaining_instances)
-                        time.sleep(random.uniform(3, 5))  # Longer delay after error
+                    except Exception as e:
+                        logger.error(f"Error parsing tweet: {e}")
                         continue
+                
+                # Check if we need to continue to next page
+                if len(tweet_containers) < 20:  # Nitter shows 20 tweets per page
                     break
                     
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error fetching tweets for {username}: {e}")
-                self.tried_instances.add(self.current_instance)
-                remaining_instances = [i for i in self.available_instances if i not in self.tried_instances]
-                if remaining_instances:
-                    self.current_instance = random.choice(remaining_instances)
-                    time.sleep(random.uniform(3, 5))  # Longer delay after error
-                    continue
-                break
+                page += 1
+                time.sleep(random.uniform(2, 4))  # Random delay between pages
+                
             except Exception as e:
-                logger.error(f"Unexpected error for {username}: {e}")
+                logger.error(f"Error fetching tweets for {username}: {e}")
                 break
         
         logger.info(f"Found {len(tweets)} tweets for {username}")
+        if not tweets:
+            logger.warning(f"No tweets found for {username} in the last 24 hours")
         return tweets
 
 def get_date_range():
@@ -316,7 +282,7 @@ def main():
     try:
         # Initialize scraper
         scraper = TwitterScraper()
-        if not scraper.setup_session():
+        if not scraper.session:
             logger.error("Failed to initialize scraper session")
             return
         
