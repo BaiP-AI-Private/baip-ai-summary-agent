@@ -131,11 +131,15 @@ class TwitterScraper:
         max_pages = 10  # Limit to 10 pages per account
         retry_count = 0
         max_retries = 3
+        last_working_instance = None
         
         while page <= max_pages and retry_count < max_retries:
             try:
-                # Ensure we have a working instance
-                if not self.current_instance:
+                # Use last working instance if available and not in cooldown
+                if last_working_instance and last_working_instance not in self.instance_retry_delays:
+                    self.current_instance = last_working_instance
+                else:
+                    # Get a new instance only if needed
                     self.current_instance = self.get_working_instance()
                     if not self.current_instance:
                         logger.error("No working Nitter instances available")
@@ -173,6 +177,19 @@ class TwitterScraper:
                         continue
                     time.sleep(5)  # Wait before trying new instance
                     continue
+                elif response.status_code != 200:
+                    logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
+                    # Try another instance
+                    self.current_instance = self.get_working_instance()
+                    if not self.current_instance:
+                        retry_count += 1
+                        time.sleep(30 * (2 ** retry_count))  # Exponential backoff
+                        continue
+                    time.sleep(5)  # Wait before trying new instance
+                    continue
+                
+                # If we get here, the instance is working
+                last_working_instance = self.current_instance
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 # Find all tweet containers
