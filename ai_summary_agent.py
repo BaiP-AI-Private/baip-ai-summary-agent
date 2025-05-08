@@ -264,10 +264,11 @@ class TwitterScraper:
                     logger.info(f"Found less than 20 tweets on page {page}, assuming last page")
                     break
                 
-                # Move to next page
+                # Move to next page and continue the loop
                 page += 1
-                logger.info(f"Moving to page {page} for {username}")
+                logger.info(f"Successfully processed page {page-1}, moving to page {page}")
                 time.sleep(random.uniform(5, 10))  # Increased delay between pages
+                continue  # Explicitly continue to next iteration
                 
             except Exception as e:
                 logger.error(f"Error fetching tweets for {username}: {e}")
