@@ -9,7 +9,7 @@ import time
 import random
 import logging
 from bs4 import BeautifulSoup
-import pytz
+import pytz  # Added missing import
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,18 +55,8 @@ NITTER_INSTANCES = [
 
 class TwitterScraper:
     def __init__(self):
-        self.available_instances = [
-            "https://nitter.net",
-            "https://nitter.1d4.us",
-            "https://nitter.kavin.rocks",
-            "https://nitter.unixfox.eu",
-            "https://nitter.moomoo.me",
-            "https://nitter.privacydev.net",
-            "https://nitter.poast.org",
-            "https://nitter.mint.lgbt",
-            "https://nitter.woodland.cafe",
-            "https://nitter.weiler.rocks"
-        ]
+        # Use the global NITTER_INSTANCES variable
+        self.available_instances = NITTER_INSTANCES
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -87,11 +77,11 @@ class TwitterScraper:
         self.session.timeout = 30
         self.tried_instances = set()
         self.instance_retry_delays = {}  # Track retry delays for each instance
-        
+
         # Initialize with a working instance
         self.current_instance = self.get_working_instance()
         if not self.current_instance:
-            raise Exception("No working Nitter instances found")
+            raise Exception("No working Nitter instances found")  # Added missing exception
         logger.info(f"Using Nitter instance: {self.current_instance}")
     
     def get_working_instance(self):
@@ -122,6 +112,7 @@ class TwitterScraper:
             except Exception as e:
                 logger.debug(f"Instance {instance} not working: {e}")
                 continue
+            time.sleep(5)  # Added delay between retries
         return None
 
     def get_user_tweets(self, username, start_date, end_date):
@@ -250,6 +241,7 @@ class TwitterScraper:
                 load_more_url = f"{self.current_instance}{load_more_button['href']}"
                 logger.info(f"Found 'Load more' URL: {load_more_url}")
             else:
+                load_more_url = None  # Reset the URL
                 logger.info("No 'Load more' button found, assuming last page")
                 break
 
