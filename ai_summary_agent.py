@@ -185,7 +185,7 @@ class TwitterScraper:
                 
                 # Find the "Load more" button and get its URL
                 # The load more button can have different class names, so we check for both
-                load_more_button = soup.find('a', class_='show-more') or soup.find('a', class_='more-replies')
+                load_more_button = soup.select_one('div.show-more a') or soup.find('a', class_='more-replies')
                 if load_more_button and 'href' in load_more_button.attrs and load_more_clicks < max_load_more_clicks:
                     load_more_url = f"{self.current_instance}{load_more_button['href']}"
                     logger.info(f"Found 'Load more' URL: {load_more_url}")
