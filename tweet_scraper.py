@@ -313,8 +313,12 @@ def main():
             
             time.sleep(random.uniform(3, 5))  # Rate limiting
         
+        # MODIFIED SECTION: Send message to Slack even when no tweets are found
         if not all_tweets:
             logger.warning("No tweets found from any account in the last 24 hours")
+            message = "No tweets found from monitored AI companies in the last 24 hours. This could be due to:\n• No new posts from the companies\n• Possible scraping issues\n\nThe AI summary agent will continue to monitor for new content."
+            if not scraper.send_to_slack(message):
+                logger.error("Failed to send 'no tweets' message to Slack")
             return
             
         # Generate and send summary
@@ -325,7 +329,14 @@ def main():
             logger.error("Failed to send summary to Slack")
     except Exception as e:
         logger.error(f"Critical error in main execution: {e}")
+        # ADDED: Send error notification to Slack
+        try:
+            scraper = TweetScraper()  # Create a new scraper instance if needed
+            error_message = f"⚠️ *Error Alert*: The AI summary agent encountered an error:\n```{str(e)}```\nPlease check the logs for more details."
+            scraper.send_to_slack(error_message)
+        except:
+            logger.error("Failed to send error notification to Slack")
         raise
 
 if __name__ == "__main__":
-    main() 
+    main()
