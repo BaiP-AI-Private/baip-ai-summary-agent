@@ -156,11 +156,25 @@ class TweetScraper:
                     continue
 
                 soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # ADDED: Debug log to see what HTML we're getting
+                logger.debug(f"Page title: {soup.title.string if soup.title else 'No title'}")
+                
                 tweet_containers = soup.find_all('div', class_='timeline-item')
                 
                 if not tweet_containers:
-                    logger.warning(f"No tweets found for {username} on this page")
-                    break
+                    # Log more detailed info and try alternative selectors
+                    logger.warning(f"No tweets found for {username} on this page using standard selector")
+                    
+                    # Try alternative selectors that might be used by Nitter
+                    alt_containers = soup.find_all('div', class_='tweet')
+                    if alt_containers:
+                        logger.info(f"Found {len(alt_containers)} tweets using alternative selector")
+                        tweet_containers = alt_containers
+                    else:
+                        # Log a sample of the HTML to debug
+                        logger.debug(f"HTML excerpt: {soup.prettify()[0:500]}...")
+                        break
 
                 logger.info(f"Found {len(tweet_containers)} tweet containers")
                 
