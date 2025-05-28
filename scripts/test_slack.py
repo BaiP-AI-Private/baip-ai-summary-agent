@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 
 # Load environment variables
-load_dotenv()
+load_dotenv(dotenv_path='../.env')
 
 def test_slack_webhook():
     """Test Slack webhook to ensure it's working"""

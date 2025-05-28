@@ -3,7 +3,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv(dotenv_path='../.env')
 
 def test_openai_api():
     """Test OpenAI API to ensure it's working"""

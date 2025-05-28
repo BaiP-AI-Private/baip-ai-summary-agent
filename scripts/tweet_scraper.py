@@ -15,14 +15,14 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('tweet_scraper.log'),
+        logging.FileHandler('../tweet_scraper.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
+# Load environment variables - look in parent directory
+load_dotenv(dotenv_path='../.env')
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -54,12 +54,6 @@ NITTER_INSTANCES = [
     "https://nitter.moomoo.me"
 ]
 
-# Alternative sources for when Nitter is down
-ALTERNATIVE_SOURCES = [
-    "https://xcancel.com",
-    "https://fixupx.com"
-]
-
 class TweetScraper:
     def __init__(self):
         self.session = requests.Session()
@@ -83,23 +77,17 @@ class TweetScraper:
         self._find_working_source()
 
     def _find_working_source(self):
-        """Find a working source (Nitter first, then alternatives)"""
-        # Try Nitter instances first
-        for instance in NITTER_INSTANCES:
+        """Find a working source (Nitter instances)"""
+        logger.info("Searching for working Nitter instances...")
+        
+        for i, instance in enumerate(NITTER_INSTANCES):
+            logger.info(f"Testing instance {i+1}/{len(NITTER_INSTANCES)}: {instance}")
             if self._test_nitter_instance(instance):
                 self.current_instance = instance
                 self.current_source_type = "nitter"
                 logger.info(f"Using Nitter instance: {instance}")
                 return
-                
-        # If no Nitter works, try alternatives
-        for alt_source in ALTERNATIVE_SOURCES:
-            if self._test_alternative_source(alt_source):
-                self.current_instance = alt_source
-                self.current_source_type = "alternative"
-                logger.info(f"Using alternative source: {alt_source}")
-                return
-                
+        
         # If nothing works, we'll still try to proceed with demo data
         logger.error("No working sources found - will generate demo summary")
         self.current_instance = None
@@ -132,16 +120,6 @@ class TweetScraper:
             logger.debug(f"Nitter instance {instance} failed: {e}")
         return False
 
-    def _test_alternative_source(self, source):
-        """Test if an alternative source is working"""
-        try:
-            test_url = f"{source}/OpenAI"
-            response = self.session.get(test_url, timeout=10)
-            return response.status_code == 200
-        except Exception as e:
-            logger.debug(f"Alternative source {source} failed: {e}")
-        return False
-
     def _get_date_range(self):
         """Get date range for the previous day in UTC"""
         utc = pytz.UTC
@@ -152,6 +130,41 @@ class TweetScraper:
         logger.info(f"Start date: {start}")
         logger.info(f"End date: {end}")
         return start, end
+
+    def _parse_tweet_date(self, date_str):
+        """Parse tweet date from various Nitter formats"""
+        if not date_str:
+            return None
+            
+        try:
+            # Common Nitter date formats
+            formats = [
+                '%b %d, %Y · %I:%M %p UTC',     # May 27, 2025 · 3:45 PM UTC
+                '%b %d, %Y · %H:%M UTC',        # May 27, 2025 · 15:45 UTC
+                '%I:%M %p · %b %d, %Y',         # 3:45 PM · May 27, 2025
+                '%H:%M · %b %d, %Y',            # 15:45 · May 27, 2025
+                '%b %d, %Y at %I:%M %p UTC',    # May 27, 2025 at 3:45 PM UTC
+                '%b %d, %Y at %H:%M UTC',       # May 27, 2025 at 15:45 UTC
+                '%Y-%m-%d %H:%M:%S UTC',        # 2025-05-27 15:45:30 UTC
+                '%b %d, %Y',                    # May 27, 2025 (just date)
+            ]
+            
+            for fmt in formats:
+                try:
+                    tweet_date = datetime.strptime(date_str.strip(), fmt)
+                    # If no timezone info in format, assume UTC
+                    if tweet_date.tzinfo is None:
+                        tweet_date = pytz.UTC.localize(tweet_date)
+                    return tweet_date
+                except ValueError:
+                    continue
+                    
+            logger.debug(f"Could not parse date: '{date_str}'")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing date '{date_str}': {e}")
+            return None
 
     def get_user_tweets(self, username, start_date, end_date):
         """Get tweets from a user within date range"""
@@ -171,12 +184,9 @@ class TweetScraper:
 
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Try multiple selectors based on source type
+            # Try multiple selectors for Nitter
             tweet_containers = []
-            if self.current_source_type == "nitter":
-                selectors = ['div.timeline-item', 'div.tweet', 'article']
-            else:
-                selectors = ['div[data-testid="tweet"]', 'article', 'div.tweet']
+            selectors = ['div.timeline-item', 'div.tweet', 'article']
                 
             for selector in selectors:
                 containers = soup.select(selector)
@@ -207,10 +217,50 @@ class TweetScraper:
                     if not tweet_text or len(tweet_text.strip()) < 10:
                         continue
 
-                    # For now, include all tweets since date parsing is unreliable
-                    tweets.append(f"@{username}: {tweet_text}")
-                    if len(tweets) >= 5:  # Limit per account
-                        break
+                    # Extract and parse tweet date
+                    tweet_date = None
+                    date_element = (
+                        container.find('span', class_='tweet-date') or
+                        container.find('time') or
+                        container.find('a', attrs={'title': True})
+                    )
+                    
+                    if date_element:
+                        # Try to get date from title attribute first (most reliable)
+                        date_str = date_element.get('title')
+                        if not date_str:
+                            # Fall back to datetime attribute
+                            date_str = date_element.get('datetime')
+                        if not date_str:
+                            # Fall back to element text
+                            date_str = date_element.get_text(strip=True)
+                        
+                        if date_str:
+                            tweet_date = self._parse_tweet_date(date_str)
+                            if tweet_date:
+                                logger.debug(f"Parsed tweet date: {tweet_date} from '{date_str}'")
+
+                    # Check if tweet is within our date range
+                    include_tweet = False
+                    if tweet_date:
+                        if start_date <= tweet_date <= end_date:
+                            include_tweet = True
+                            logger.debug(f"Tweet from {tweet_date} is within range {start_date} to {end_date}")
+                        else:
+                            logger.debug(f"Tweet from {tweet_date} is outside range {start_date} to {end_date}")
+                    else:
+                        # If we can't parse the date, include it as a fallback (recent tweets)
+                        # This helps when Nitter changes formats or has issues
+                        include_tweet = True
+                        logger.debug(f"No date found, including tweet as fallback: {tweet_text[:50]}...")
+                    
+                    if include_tweet:
+                        tweets.append(f"@{username}: {tweet_text}")
+                        logger.info(f"Added tweet from {username}: {tweet_text[:100]}...")
+                        
+                        # Limit tweets per account to avoid overwhelming the summary
+                        if len(tweets) >= 8:  # Increased limit slightly
+                            break
 
                 except Exception as e:
                     logger.error(f"Error parsing tweet container: {e}")
@@ -221,17 +271,8 @@ class TweetScraper:
 
         logger.info(f"Found {len(tweets)} tweets for {username}")
         return tweets
-
     def generate_demo_summary(self):
         """Generate a demo summary when scraping fails"""
-        demo_content = [
-            "@OpenAI: Excited to share updates on GPT-4 Turbo performance improvements and new API features rolling out this week.",
-            "@AnthropicAI: Claude 3.5 Sonnet continues to show strong performance on coding benchmarks. Safety remains our top priority.",
-            "@GoogleDeepMind: New research on multimodal AI models published in Nature. Breakthrough in vision-language understanding.",
-            "@MistralAI: Mistral Large 2 now available with improved reasoning capabilities and expanded context window.",
-            "@AIatMeta: Llama 3 adoption growing rapidly across enterprise use cases. Open source AI democratizing innovation.",
-        ]
-        
         summary = """**Demo Summary - AI Industry Updates**
 
 • **Model Improvements**: Multiple companies releasing enhanced versions of their flagship models with better performance
@@ -244,8 +285,49 @@ class TweetScraper:
         
         return summary
 
+    def generate_manual_summary(self, tweets):
+        """Generate a manual summary when OpenAI is unavailable"""
+        summary = "**Daily AI Summary - Manual Overview**\n\n"
+        
+        # Extract key topics from tweets
+        topics = {
+            "model": ["gpt", "claude", "gemini", "llama", "mistral", "model"],
+            "api": ["api", "endpoint", "integration", "developer"],
+            "research": ["research", "paper", "study", "breakthrough"],
+            "product": ["launch", "release", "announce", "new", "update"],
+            "partnership": ["partner", "collaboration", "team", "join"]
+        }
+        
+        categorized = {}
+        for tweet in tweets[:20]:
+            tweet_lower = tweet.lower()
+            for category, keywords in topics.items():
+                if any(keyword in tweet_lower for keyword in keywords):
+                    if category not in categorized:
+                        categorized[category] = []
+                    categorized[category].append(tweet)
+                    break
+        
+        if categorized:
+            for category, category_tweets in categorized.items():
+                if category_tweets:
+                    summary += f"• **{category.title()} Updates**: {len(category_tweets)} related posts\n"
+            
+            summary += "\n**Sample Posts:**\n"
+            for tweet in tweets[:5]:
+                summary += f"• {tweet}\n"
+        else:
+            summary += "• Multiple posts from AI companies tracked\n"
+            summary += "• Content includes company updates and announcements\n\n"
+            summary += "**Recent Posts:**\n"
+            for tweet in tweets[:8]:
+                summary += f"• {tweet}\n"
+        
+        summary += "\n*Note: Manual summary generated due to API limitations. AI-powered analysis will resume when quota is restored.*"
+        return summary
+
     def generate_summary(self, tweets):
-        """Generate summary using OpenAI with updated API"""
+        """Generate summary using OpenAI with updated API and fallbacks"""
         if not tweets:
             return self.generate_demo_summary()
 
@@ -277,7 +359,14 @@ Summary:""".format(text)
             return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"Error generating summary: {e}")
-            return f"Failed to generate summary. Error: {str(e)}"
+            
+            # Check if it's a quota error and provide a meaningful fallback
+            if "insufficient_quota" in str(e) or "exceeded" in str(e).lower():
+                logger.warning("OpenAI API quota exceeded, generating manual summary")
+                return self.generate_manual_summary(tweets)
+            else:
+                logger.warning("OpenAI API error, generating manual summary")
+                return self.generate_manual_summary(tweets)
 
     def send_to_slack(self, message):
         """Send summary to Slack"""
@@ -305,7 +394,6 @@ Summary:""".format(text)
         except Exception as e:
             logger.error(f"Error posting to Slack: {e}")
         return False
-
 def main():
     """Main execution flow"""
     # Validate environment variables
@@ -328,6 +416,7 @@ def main():
         successful_accounts = 0
         
         if scraper.current_instance:
+            logger.info("Found working source, attempting to scrape tweets...")
             for account in X_ACCOUNTS:
                 logger.info(f"Processing {account}...")
                 try:
@@ -374,7 +463,6 @@ def main():
             error_scraper.send_to_slack(error_message)
         except Exception as slack_error:
             logger.error(f"Failed to send error notification to Slack: {slack_error}")
-        raise
 
 if __name__ == "__main__":
     main()
