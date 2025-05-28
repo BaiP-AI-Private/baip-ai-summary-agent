@@ -21,11 +21,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables - look in parent directory
-load_dotenv(dotenv_path='../.env')
+# Load environment variables - try multiple paths for flexibility
+load_dotenv()  # Try current directory first
+load_dotenv(dotenv_path='../.env')  # Try parent directory
+load_dotenv(dotenv_path='.env')  # Try explicit current directory
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Debug environment variables
+api_key = os.getenv("OPENAI_API_KEY")
+slack_url = os.getenv("SLACK_WEBHOOK_URL")
+logger.info(f"OpenAI API key present: {bool(api_key)}")
+logger.info(f"Slack webhook URL present: {bool(slack_url)}")
+
+# Initialize OpenAI client with error handling
+client = None
+try:
+    if not api_key:
+        logger.error("OPENAI_API_KEY environment variable not found")
+        client = None
+    else:
+        # Try to initialize with explicit parameters to avoid proxy issues
+        client = OpenAI(
+            api_key=api_key,
+            timeout=30.0,
+            max_retries=2
+        )
+        logger.info("OpenAI client initialized successfully")
+except TypeError as te:
+    logger.warning(f"OpenAI client initialization failed (TypeError): {te}")
+    # Try without optional parameters that might cause issues
+    try:
+        client = OpenAI(api_key=api_key)
+        logger.info("OpenAI client initialized with minimal parameters")
+    except Exception as e3:
+        logger.error(f"Minimal OpenAI initialization also failed: {e3}")
+        client = None
+except Exception as e:
+    logger.warning(f"Failed to initialize OpenAI client: {e}")
+    # Try alternative initialization for older versions
+    try:
+        import openai
+        openai.api_key = api_key
+        client = None  # Will use legacy API calls
+        logger.info("Using legacy OpenAI API initialization")
+    except Exception as e2:
+        logger.error(f"Failed to initialize OpenAI with legacy method: {e2}")
+        client = None
 
 # Configuration
 X_ACCOUNTS = [
@@ -350,13 +390,26 @@ Tweets:
 Summary:""".format(text)
 
         try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=600
-            )
-            return response.choices[0].message.content.strip()
+            # Try new OpenAI client first
+            if client:
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=600
+                )
+                return response.choices[0].message.content.strip()
+            else:
+                # Fall back to legacy OpenAI API
+                import openai
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=600
+                )
+                return response.choices[0].message.content.strip()
+                
         except Exception as e:
             logger.error(f"Error generating summary: {e}")
             
