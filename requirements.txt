@@ -6,3 +6,4 @@ certifi>=2024.2.2
 pytz>=2024.1
 playwright>=1.40.0
 jmespath>=1.0.1
+scrapfly-sdk>=1.0.0

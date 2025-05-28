@@ -25,9 +25,11 @@ ai-summary-agent/
     ├── twitter_scraper_fallback.py      # 🆘 Minimal fallback scraper
     ├── ai_summary_agent.py              # Alternative implementation
     ├── test_setup.py                    # Setup verification script
+    ├── test_openai_data.py              # Raw data extraction test tool
     ├── setup.sh                         # Installation script
     ├── README_scrapfly.md               # Scrapfly method documentation
-    └── README_nitter.md                 # Nitter method documentation
+    ├── README_nitter.md                 # Nitter method documentation
+    └── README_test_openai.md            # OpenAI data test documentation
 ```
 
 ## 🛠️ Technology Stack & Scraper Implementations
@@ -164,6 +166,9 @@ cd scripts
 
 # Verify setup and dependencies
 python test_setup.py
+
+# Test raw data scraping (saves unfiltered OpenAI data to text file)
+python test_openai_data.py
 
 # Install dependencies (Linux/Mac)
 ./setup.sh
@@ -335,6 +340,7 @@ Install via `pip install -r requirements.txt`:
 - `pytz>=2024.1` - Timezone handling
 - `playwright>=1.40.0` - Browser automation (Scrapfly method)
 - `jmespath>=1.0.1` - JSON parsing (Scrapfly method)
+- `scrapfly-sdk>=1.0.0` - Professional scraping service (optional)
 
 ## 🔧 Troubleshooting
 
@@ -389,6 +395,7 @@ cd scripts && python twitter_scraper_scrapfly.py
 - [**Twitter Scraper Summary**](TWITTER_SCRAPER_SUMMARY.md) - Implementation overview and comparison
 - [**Scrapfly Method Guide**](scripts/README_scrapfly.md) - Detailed Playwright implementation docs
 - [**Nitter Method Guide**](scripts/README_nitter.md) - Legacy scraping approach documentation  
+- [**OpenAI Data Test Guide**](scripts/README_test_openai.md) - Raw data extraction and inspection tool
 - [**Workflow Updates**](.github/WORKFLOW_UPDATES.md) - GitHub Actions configuration and changes
 - [**Setup Script**](scripts/setup.sh) - Automated dependency installation
 
