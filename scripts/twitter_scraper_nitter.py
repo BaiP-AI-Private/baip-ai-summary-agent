@@ -321,6 +321,7 @@ class TweetScraper:
                 else:
                     return []
 
+        try:
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # Debug: Show a snippet of the HTML structure
@@ -425,6 +426,7 @@ class TweetScraper:
 
         logger.info(f"Found {len(tweets)} tweets for {username}")
         return tweets
+
     def generate_no_tweets_message(self):
         """Generate a simple message when no tweets are found"""
         if self.current_instance:

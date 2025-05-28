@@ -1,0 +1,47 @@
+name: Daily AI Summary - Fallback
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fallback-summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install basic dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests python-dotenv
+
+    - name: Send fallback notification
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        python -c "
+        import requests
+        import os
+        from datetime import datetime
+        
+        webhook_url = os.getenv('SLACK_WEBHOOK_URL')
+        if webhook_url:
+            payload = {
+                'text': f'*📰 Daily AI Summary - Fallback Mode - {datetime.now().strftime(\"%Y-%m-%d\")}*\n\nThe main Twitter scraper encountered issues. This is a fallback notification.\n\nMonitored accounts: OpenAI, xAI, AnthropicAI, GoogleDeepMind, MistralAI, AIatMeta, Cohere, perplexity_ai, scale_ai, runwayml, dair_ai\n\n_Please check the main workflow logs for details._',
+                'mrkdwn': True
+            }
+            response = requests.post(webhook_url, json=payload)
+            if response.status_code == 200:
+                print('Fallback notification sent successfully')
+            else:
+                print(f'Failed to send notification: {response.status_code}')
+        else:
+            print('No Slack webhook URL configured')
+        "
