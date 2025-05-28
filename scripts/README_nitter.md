@@ -4,7 +4,7 @@ This directory contains the scripts for the AI Summary Agent.
 
 ## Main Scripts
 
-### `tweet_scraper.py`
+### `twitter_scraper_nitter.py`
 The main tweet scraping and summarization script.
 - Scrapes tweets from AI companies using Nitter instances
 - Generates AI-powered summaries using OpenAI
@@ -14,7 +14,7 @@ The main tweet scraping and summarization script.
 **Usage:**
 ```bash
 cd scripts
-python tweet_scraper.py
+python twitter_scraper_nitter.py
 ```
 
 ### `ai_summary_agent.py`

@@ -1,14 +1,14 @@
 # Twitter Scraper - Implementation Summary
 
 ## Problem Identified
-The original `tweet_scraper.py` had a syntax error around line 423 with malformed exception handling and relied on unreliable Nitter instances.
+The original `twitter_scraper_nitter.py` had a syntax error around line 423 with malformed exception handling and relied on unreliable Nitter instances.
 
 ## Solution Implemented
 Created a new modern Twitter scraper using the Scrapfly method with Playwright to capture background requests from X.com directly.
 
 ## Files Created
 
-### 1. `twitter_scraper_new.py` 
+### 1. `twitter_scraper_scrapfly.py` 
 - Main scraper using Playwright and background request capture
 - Implements the Scrapfly method for reliable data extraction
 - Includes proper error handling and rate limiting
@@ -41,7 +41,7 @@ Created a new modern Twitter scraper using the Scrapfly method with Playwright t
 1. Install dependencies: `pip install -r requirements.txt`
 2. Install Playwright browsers: `playwright install chromium`
 3. Test setup: `python test_setup.py`
-4. Run scraper: `python twitter_scraper_new.py`
+4. Run scraper: `python twitter_scraper_scrapfly.py`
 
 ## Configuration
 

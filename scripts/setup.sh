@@ -13,7 +13,7 @@ playwright install chromium
 echo "Setup complete!"
 echo ""
 echo "To run the new scraper:"
-echo "python twitter_scraper_new.py"
+echo "python twitter_scraper_scrapfly.py"
 echo ""
 echo "Make sure your .env file contains:"
 echo "SLACK_WEBHOOK_URL=your_webhook_url"

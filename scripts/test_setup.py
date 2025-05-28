@@ -56,7 +56,9 @@ def test_environment():
         print("✗ OPENAI_API_KEY not found in .env file")
         return False
     
-    return Trueasync def test_playwright():
+    return True
+
+async def test_playwright():
     """Test if Playwright can launch a browser"""
     print("\nTesting Playwright browser launch...")
     
@@ -93,7 +95,7 @@ async def main():
     print("\n" + "="*30)
     if deps_ok and env_ok and browser_ok:
         print("✓ All tests passed! The scraper should work correctly.")
-        print("\nRun the scraper with: python twitter_scraper_new.py")
+        print("\nRun the scraper with: python twitter_scraper_scrapfly.py")
     else:
         print("✗ Some tests failed. Please fix the issues above.")
         sys.exit(1)

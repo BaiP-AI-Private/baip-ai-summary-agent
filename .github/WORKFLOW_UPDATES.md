@@ -5,7 +5,7 @@
 ### 1. Updated Main Workflow (`daily-summary.yml`)
 
 **Key Changes:**
-- **Script**: Changed from `tweet_scraper.py` to `twitter_scraper_new.py`
+- **Script**: Changed from `twitter_scraper_nitter.py` to `twitter_scraper_scrapfly.py`
 - **Python Version**: Updated to 3.11 for better performance
 - **Actions**: Updated to latest versions (checkout@v4, setup-python@v5)
 - **Playwright Setup**: Added Playwright browser installation
@@ -24,7 +24,7 @@
   continue-on-error: true
 
 - name: Run AI summary generator
-  run: cd scripts && python twitter_scraper_new.py
+  run: cd scripts && python twitter_scraper_scrapfly.py
 ```
 
 ### 2. Created Fallback Workflow (`fallback-summary.yml`)

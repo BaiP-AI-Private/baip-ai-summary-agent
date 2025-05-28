@@ -4,7 +4,7 @@
 This is a modern Twitter/X.com scraper using the Playwright method recommended by Scrapfly. It captures background requests to reliably extract tweet data.
 
 ## Files Created
-- `twitter_scraper_new.py` - Main scraper using Playwright
+- `twitter_scraper_scrapfly.py` - Main scraper using Playwright
 - `setup.sh` - Installation script
 - Updated `requirements.txt` - Added new dependencies
 
@@ -30,7 +30,7 @@ This is a modern Twitter/X.com scraper using the Playwright method recommended b
 
 ```bash
 cd scripts
-python twitter_scraper_new.py
+python twitter_scraper_scrapfly.py
 ```
 
 ## How It Works
