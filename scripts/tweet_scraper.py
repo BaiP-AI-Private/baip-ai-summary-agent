@@ -82,16 +82,18 @@ X_ACCOUNTS = [
     "dair_ai"
 ]
 
-# Multiple Nitter instances + alternative sources
+# Multiple Nitter instances (updated list of more reliable instances)
 NITTER_INSTANCES = [
-    "https://nitter.poast.org",
-    "https://nitter.privacydev.net", 
-    "https://nitter.unixfox.eu",
-    "https://nitter.kavin.rocks",
     "https://nitter.net",
+    "https://nitter.unixfox.eu",
+    "https://nitter.kavin.rocks", 
+    "https://nitter.poast.org",
+    "https://nitter.privacydev.net",
     "https://nitter.rawbit.ninja",
-    "https://nitter.1d4.us",
-    "https://nitter.moomoo.me"
+    "https://nitter.moomoo.me",
+    "https://nitter.fdn.fr",
+    "https://nitter.nixnet.services",
+    "https://nitter.42l.fr"
 ]
 
 class TweetScraper:
@@ -119,45 +121,104 @@ class TweetScraper:
     def _find_working_source(self):
         """Find a working source (Nitter instances)"""
         logger.info("Searching for working Nitter instances...")
+        logger.info(f"Will test {len(NITTER_INSTANCES)} instances with 20s timeout each")
         
         for i, instance in enumerate(NITTER_INSTANCES):
             logger.info(f"Testing instance {i+1}/{len(NITTER_INSTANCES)}: {instance}")
+            
             if self._test_nitter_instance(instance):
                 self.current_instance = instance
                 self.current_source_type = "nitter"
-                logger.info(f"Using Nitter instance: {instance}")
+                logger.info(f"SUCCESS: Successfully found working Nitter instance: {instance}")
                 return
+            else:
+                logger.info(f"FAILED: Instance {instance} is not working")
         
-        # If nothing works, we'll still try to proceed with demo data
-        logger.error("No working sources found - will generate demo summary")
+        # If nothing works, we'll still try to proceed with fallback message
+        logger.error("No working sources found after testing all instances - will use fallback message")
         self.current_instance = None
         self.current_source_type = None
 
     def _test_nitter_instance(self, instance):
-        """Test if a Nitter instance is working"""
+        """Test if a Nitter instance is working with improved patience and validation"""
         try:
             if instance in self.instance_retry_delays:
                 delay = self.instance_retry_delays[instance]
                 if datetime.now() < delay:
+                    logger.debug(f"Instance {instance} in cooldown until {delay}")
                     return False
 
-            test_url = f"{instance}/OpenAI"
-            response = self.session.get(test_url, timeout=10, allow_redirects=True)
+            # Try multiple test approaches
+            test_approaches = [
+                f"{instance}/OpenAI",
+                f"{instance}/elonmusk",  # Alternative popular account
+                f"{instance}",           # Just the homepage
+            ]
             
-            if any(pattern in response.url.lower() for pattern in ["status.d420.de", "blocked", "error", "maintenance"]):
-                return False
-
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                if soup.find('div', class_='timeline') or soup.find('div', class_='profile') or soup.find('div', class_='timeline-item'):
-                    return True
+            for i, test_url in enumerate(test_approaches):
+                logger.debug(f"Testing URL approach {i+1}: {test_url}")
+                
+                try:
+                    # Increase timeout and be more patient
+                    response = self.session.get(test_url, timeout=25, allow_redirects=True)
                     
-            elif response.status_code == 429:
-                cooldown = datetime.now() + timedelta(seconds=120)
-                self.instance_retry_delays[instance] = cooldown
+                    logger.debug(f"Response status: {response.status_code}")
+                    logger.debug(f"Final URL: {response.url}")
+                    
+                    # Check for obvious redirect patterns that indicate issues
+                    suspicious_domains = ["status.d420.de", "blocked", "error", "maintenance", "coaufu.com", "redirect", "spam"]
+                    if any(pattern in response.url.lower() for pattern in suspicious_domains):
+                        logger.debug(f"Instance {instance} redirected to suspicious domain: {response.url}")
+                        continue
+
+                    if response.status_code == 200:
+                        # Be less strict about content validation
+                        content_lower = response.text.lower()
+                        
+                        # Check for basic Nitter indicators (more flexible)
+                        nitter_indicators = [
+                            'nitter',           # The word "nitter" appears
+                            'twitter',          # Twitter-related content
+                            'tweet',            # Tweet-related content  
+                            'timeline',         # Timeline elements
+                            'profile',          # Profile elements
+                        ]
+                        
+                        # For homepage, look for different indicators
+                        if test_url.endswith(instance):
+                            nitter_indicators.extend(['privacy', 'alternative', 'frontend'])
+                        else:
+                            # For profile pages, look for account-specific content
+                            account_name = test_url.split('/')[-1].lower()
+                            nitter_indicators.extend([account_name, f'@{account_name}'])
+                        
+                        indicators_found = sum(1 for indicator in nitter_indicators if indicator in content_lower)
+                        logger.debug(f"Found {indicators_found}/{len(nitter_indicators)} indicators")
+                        
+                        if indicators_found >= 2:  # More flexible - just need 2 indicators
+                            logger.info(f"SUCCESS: Instance {instance} appears to be working (found {indicators_found} indicators via approach {i+1})")
+                            return True
+                        elif indicators_found >= 1 and len(response.text) > 1000:  # Has some content and reasonable size
+                            logger.info(f"SUCCESS: Instance {instance} appears to be working (minimal validation passed)")
+                            return True
+                        else:
+                            logger.debug(f"Approach {i+1} for {instance} doesn't look like Nitter (only {indicators_found} indicators)")
+                            
+                    elif response.status_code == 429:
+                        cooldown = datetime.now() + timedelta(seconds=300)  # 5 min cooldown for rate limit
+                        self.instance_retry_delays[instance] = cooldown
+                        logger.warning(f"Instance {instance} rate limited, cooling down until {cooldown}")
+                        break  # Don't try other approaches if rate limited
+                    else:
+                        logger.debug(f"Approach {i+1} for {instance} returned status {response.status_code}")
+                        
+                except Exception as approach_error:
+                    logger.debug(f"Approach {i+1} for {instance} failed: {approach_error}")
+                    continue
                 
         except Exception as e:
-            logger.debug(f"Nitter instance {instance} failed: {e}")
+            logger.debug(f"Instance {instance} test failed: {e}")
+            
         return False
 
     def _get_date_range(self):
@@ -212,30 +273,83 @@ class TweetScraper:
             return []
             
         tweets = []
-        try:
-            url = f"{self.current_instance}/{username}"
-            logger.info(f"Fetching from URL: {url}")
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                url = f"{self.current_instance}/{username}"
+                logger.info(f"Fetching from URL: {url} (attempt {attempt + 1}/{max_retries})")
 
-            response = self.session.get(url, timeout=30)
-            
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
-                return []
+                response = self.session.get(url, timeout=30)
+                
+                if response.status_code == 200:
+                    # Success - process the response
+                    break
+                elif response.status_code in [502, 503, 504]:
+                    # Server errors - the instance might be overloaded
+                    logger.warning(f"Server error {response.status_code} for {username} on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying in 5 seconds...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        logger.error(f"Failed to fetch tweets for {username} after {max_retries} attempts: {response.status_code}")
+                        return []
+                elif response.status_code == 429:
+                    # Rate limited - try a different instance if available
+                    logger.warning(f"Rate limited for {username}, marking instance for cooldown")
+                    cooldown = datetime.now() + timedelta(minutes=10)
+                    self.instance_retry_delays[self.current_instance] = cooldown
+                    # Try to find another instance
+                    old_instance = self.current_instance
+                    self._find_working_source()
+                    if self.current_instance and self.current_instance != old_instance:
+                        logger.info(f"Switched to new instance: {self.current_instance}")
+                        continue
+                    else:
+                        logger.error(f"No alternative instances available")
+                        return []
+                else:
+                    logger.error(f"Failed to fetch tweets for {username}: {response.status_code}")
+                    return []
+                    
+            except Exception as e:
+                logger.error(f"Error fetching tweets for {username} on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                    continue
+                else:
+                    return []
 
             soup = BeautifulSoup(response.text, 'html.parser')
             
+            # Debug: Show a snippet of the HTML structure
+            logger.debug(f"Page title: {soup.title.string if soup.title else 'No title'}")
+            logger.debug(f"HTML content length: {len(response.text)} characters")
+            
             # Try multiple selectors for Nitter
             tweet_containers = []
-            selectors = ['div.timeline-item', 'div.tweet', 'article']
+            selectors = ['div.timeline-item', 'div.tweet', 'article', 'div[class*="tweet"]', 'div[class*="post"]']
                 
             for selector in selectors:
                 containers = soup.select(selector)
-                if containers:
+                logger.debug(f"Selector '{selector}' found {len(containers)} elements")
+                if containers and not tweet_containers:
                     tweet_containers = containers[:10]  # Limit to first 10
+                    logger.info(f"Using selector '{selector}' - found {len(containers)} tweet containers")
                     break
             
             if not tweet_containers:
                 logger.warning(f"No tweets found for {username}")
+                # Debug: Show some of the page structure
+                main_content = soup.find('main') or soup.find('body')
+                if main_content:
+                    logger.debug("Available div classes in main content:")
+                    divs = main_content.find_all('div', limit=10)
+                    for div in divs:
+                        classes = div.get('class', [])
+                        if classes:
+                            logger.debug(f"  div.{'.'.join(classes)}")
                 return []
 
             logger.info(f"Processing {len(tweet_containers)} tweet containers")
@@ -307,23 +421,16 @@ class TweetScraper:
                     continue
 
         except Exception as e:
-            logger.error(f"Error fetching tweets for {username}: {e}")
+            logger.error(f"Error processing response for {username}: {e}")
 
         logger.info(f"Found {len(tweets)} tweets for {username}")
         return tweets
-    def generate_demo_summary(self):
-        """Generate a demo summary when scraping fails"""
-        summary = """**Demo Summary - AI Industry Updates**
-
-• **Model Improvements**: Multiple companies releasing enhanced versions of their flagship models with better performance
-• **API Updates**: New features and improvements being rolled out to developer platforms  
-• **Research Advances**: Continued breakthroughs in multimodal AI and reasoning capabilities
-• **Enterprise Adoption**: Growing use of AI models in business applications
-• **Open Source**: Continued push for democratizing AI through open source initiatives
-
-*Note: This is a demo summary as tweet scraping services are currently unavailable. The monitoring system will resume normal operation when services are restored.*"""
-        
-        return summary
+    def generate_no_tweets_message(self):
+        """Generate a simple message when no tweets are found"""
+        if self.current_instance:
+            return f"No tweets found from monitored AI companies in the last 24 hours. The monitoring system successfully connected to Nitter but the accounts may not have posted recently."
+        else:
+            return "No tweets found from monitored AI companies in the last 24 hours. Nitter services are currently experiencing connectivity issues."
 
     def generate_manual_summary(self, tweets):
         """Generate a manual summary when OpenAI is unavailable"""
@@ -369,7 +476,7 @@ class TweetScraper:
     def generate_summary(self, tweets):
         """Generate summary using OpenAI with updated API and fallbacks"""
         if not tweets:
-            return self.generate_demo_summary()
+            return self.generate_no_tweets_message()
 
         text = "\n\n".join(tweets[:25])
         prompt = """Analyze these tweets from AI companies and create a concise daily summary:
@@ -486,7 +593,7 @@ def main():
                 # Rate limiting between accounts
                 time.sleep(random.uniform(3, 5))
         else:
-            logger.warning("No working sources available, will generate demo summary")
+            logger.warning("No working sources available, will use fallback message")
         
         logger.info(f"Successfully processed {successful_accounts}/{len(X_ACCOUNTS)} accounts")
         logger.info(f"Total tweets collected: {len(all_tweets)}")
@@ -497,9 +604,9 @@ def main():
             message = f"{summary}\n\n_Processed {successful_accounts}/{len(X_ACCOUNTS)} accounts • {len(all_tweets)} total tweets_"
             logger.info("Generated summary from scraped tweets")
         else:
-            summary = scraper.generate_demo_summary()
-            message = f"{summary}\n\n_Demo mode: {successful_accounts}/{len(X_ACCOUNTS)} accounts processed • Scraping services unavailable_"
-            logger.info("Generated demo summary due to scraping issues")
+            summary = scraper.generate_no_tweets_message()
+            message = summary  # Just the simple message, no additional metadata
+            logger.info("No tweets found from any monitored accounts")
         
         # Send to Slack
         if not scraper.send_to_slack(message):
@@ -512,7 +619,7 @@ def main():
         # Send error notification to Slack
         try:
             error_scraper = TweetScraper()
-            error_message = f"⚠️ *Error Alert*: The AI summary agent encountered a critical error:\n```{str(e)}```\nPlease check the logs for more details."
+            error_message = f"*Error Alert*: The AI summary agent encountered a critical error:\n```{str(e)}```\nPlease check the logs for more details."
             error_scraper.send_to_slack(error_message)
         except Exception as slack_error:
             logger.error(f"Failed to send error notification to Slack: {slack_error}")
