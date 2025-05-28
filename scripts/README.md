@@ -1,6 +1,6 @@
 # Scripts Directory
 
-This directory contains all the scripts and utilities for the AI Summary Agent.
+This directory contains the scripts for the AI Summary Agent.
 
 ## Main Scripts
 
@@ -20,26 +20,6 @@ python tweet_scraper.py
 ### `ai_summary_agent.py`
 Alternative/backup implementation of the summary agent.
 
-## Test Scripts
-
-### `test_slack.py`
-Tests the Slack webhook integration.
-```bash
-python test_slack.py
-```
-
-### `test_openai.py`
-Tests the OpenAI API connectivity and quota.
-```bash
-python test_openai.py
-```
-
-### `test_full_functionality.py`
-Comprehensive test of all tweet scraper functionality with mock data.
-```bash
-python test_full_functionality.py
-```
-
 ## Environment Setup
 
 All scripts expect the `.env` file to be in the parent directory (`../`).
@@ -51,5 +31,4 @@ Required environment variables:
 ## Logs
 
 Script logs are generated in:
-- `tweet_scraper.log` - Main script logs
-- `../tweet_scraper.log` - Root directory logs (for backward compatibility)
+- `../tweet_scraper.log` - Main script logs in the root directory
