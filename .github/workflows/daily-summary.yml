@@ -46,6 +46,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
       run: cd scripts && python twitter_scraper_scrapfly.py
     - name: Upload logs on failure
       if: failure()

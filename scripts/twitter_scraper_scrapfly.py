@@ -14,7 +14,14 @@ from openai import OpenAI
 import requests
 from dotenv import load_dotenv
 
-# Try to import playwright
+# Try to import scrapfly
+try:
+    from scrapfly import ScrapeConfig, ScrapflyClient
+    SCRAPFLY_AVAILABLE = True
+except ImportError:
+    SCRAPFLY_AVAILABLE = False
+
+# Try to import playwright as fallback
 try:
     from playwright.async_api import async_playwright
     PLAYWRIGHT_AVAILABLE = True
@@ -62,11 +69,22 @@ class TwitterScraperNew:
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox']
+            args=[
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
+            ]
         )
         self.context = await self.browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         self.page = await self.context.new_page()
         return self
@@ -136,8 +154,72 @@ class TwitterScraperNew:
             
         return tweets
 
-    async def scrape_user_timeline(self, username: str, max_tweets: int = 10) -> List[Dict]:
-        """Scrape recent tweets from a user's timeline"""
+    async def scrape_user_timeline_scrapfly(self, username: str, max_tweets: int = 10) -> List[Dict]:
+        """Scrape user timeline using Scrapfly (more reliable)"""
+        if not SCRAPFLY_AVAILABLE:
+            logger.warning("Scrapfly not available, falling back to Playwright")
+            return await self.scrape_user_timeline_playwright(username, max_tweets)
+        
+        # Check for Scrapfly API key
+        scrapfly_key = os.getenv("SCRAPFLY_API_KEY")
+        if not scrapfly_key:
+            logger.warning("SCRAPFLY_API_KEY not found, falling back to Playwright")
+            return await self.scrape_user_timeline_playwright(username, max_tweets)
+        
+        url = f"https://x.com/{username}"
+        logger.info(f"Scraping timeline for @{username} using Scrapfly")
+        
+        try:
+            scrapfly = ScrapflyClient(key=scrapfly_key)
+            
+            result = await scrapfly.async_scrape(ScrapeConfig(
+                url,
+                render_js=True,  # Enable headless browser
+                wait_for_selector="[data-testid='tweet']",  # Wait for tweets to load
+                cache=False,  # Don't use cache for fresh data
+                country="US",  # Use US proxy
+                proxy_pool="public_residential_pool"  # Use residential proxies
+            ))
+            
+            # Extract XHR calls from browser data
+            xhr_calls = result.scrape_result.get("browser_data", {}).get("xhr_call", [])
+            
+            tweets = []
+            for xhr in xhr_calls:
+                if xhr.get("url") and ("UserTweets" in xhr["url"] or "UserMedia" in xhr["url"]):
+                    try:
+                        if xhr.get("response", {}).get("body"):
+                            response_data = json.loads(xhr["response"]["body"])
+                            parsed_tweets = self.parse_user_timeline_tweets(response_data)
+                            tweets.extend(parsed_tweets)
+                            if len(tweets) >= max_tweets:
+                                break
+                    except Exception as e:
+                        logger.debug(f"Could not parse Scrapfly XHR response: {e}")
+                        continue
+            
+            # Remove duplicates based on tweet ID
+            seen_ids = set()
+            unique_tweets = []
+            for tweet in tweets:
+                tweet_id = tweet.get("id")
+                if tweet_id and tweet_id not in seen_ids:
+                    seen_ids.add(tweet_id)
+                    tweet["source"] = "scrapfly"  # Mark source
+                    unique_tweets.append(tweet)
+            
+            # Filter to most recent tweets
+            tweets = unique_tweets[:max_tweets]
+            logger.info(f"Found {len(tweets)} tweets for @{username} via Scrapfly")
+            return tweets
+            
+        except Exception as e:
+            logger.error(f"Error scraping @{username} with Scrapfly: {e}")
+            logger.info(f"Falling back to Playwright for @{username}")
+            return await self.scrape_user_timeline_playwright(username, max_tweets)
+
+    async def scrape_user_timeline_playwright(self, username: str, max_tweets: int = 10) -> List[Dict]:
+        """Scrape recent tweets from a user's timeline using Playwright (fallback method)"""
         url = f"https://x.com/{username}"
         logger.info(f"Scraping timeline for @{username}")
         
@@ -185,6 +267,10 @@ class TwitterScraperNew:
         except Exception as e:
             logger.error(f"Error scraping @{username}: {e}")
             return []
+
+    async def scrape_user_timeline(self, username: str, max_tweets: int = 10) -> List[Dict]:
+        """Main method to scrape user timeline - tries Scrapfly first, falls back to Playwright"""
+        return await self.scrape_user_timeline_scrapfly(username, max_tweets)
 
     def is_tweet_from_yesterday(self, tweet: Dict) -> bool:
         """Check if tweet is from yesterday (previous 24 hours)"""
@@ -372,10 +458,15 @@ async def main():
         logger.error(f"Missing environment variables: {', '.join(missing)}")
         return
 
-    if not PLAYWRIGHT_AVAILABLE:
-        logger.error("Playwright is not available. Please install it:")
-        logger.error("pip install playwright")
-        logger.error("playwright install chromium")
+    # Check for Scrapfly API key (optional but recommended)
+    if not os.getenv("SCRAPFLY_API_KEY"):
+        logger.warning("SCRAPFLY_API_KEY not found - will use Playwright fallback (less reliable)")
+        logger.warning("For better results, sign up at https://scrapfly.io and add your API key to .env")
+
+    if not SCRAPFLY_AVAILABLE and not PLAYWRIGHT_AVAILABLE:
+        logger.error("Neither Scrapfly nor Playwright are available. Please install at least one:")
+        logger.error("For Scrapfly: pip install scrapfly-sdk")
+        logger.error("For Playwright: pip install playwright && playwright install chromium")
         return
 
     try:
