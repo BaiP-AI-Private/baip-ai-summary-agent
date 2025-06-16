@@ -1,8 +1,8 @@
-name: Daily AI Summary
+name: AI Summary - Business Week
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 11:00 UTC daily
+    - cron: '0 2 * * 2-6'  # 2:00 AM UTC, Tuesday through Saturday
   workflow_dispatch:
 
 jobs:
@@ -39,13 +39,32 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      run: cd scripts && python test_setup.py
+        SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
+      run: cd tests && python test_setup.py
       continue-on-error: true
+
+    - name: Debug environment and time
+      env:
+        SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
+      run: |
+        echo "Current UTC time: $(date -u)"
+        echo "Scheduled run: Business week (Tue-Sat) at 2:00 AM UTC"
+        echo "Timezone: $TZ"
+        echo "Scrapfly key present: $([ -n '${{ secrets.SCRAPFLY_API_KEY }}' ] && echo 'YES' || echo 'NO')"
+        cd scripts && python -c "
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        print(f'Python UTC time: {now}')
+        print(f'120h ago: {now - timedelta(hours=120)}')
+        print(f'72h ago: {now - timedelta(hours=72)}')
+        print(f'24h ago: {now - timedelta(hours=24)}')
+        "
 
     - name: Run AI summary generator
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
       run: cd scripts && python twitter_scraper_scrapfly.py
     - name: Upload logs on failure
       if: failure()

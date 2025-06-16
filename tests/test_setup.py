@@ -39,7 +39,7 @@ def test_environment():
     print("\nTesting environment variables...")
     
     load_dotenv()
-    load_dotenv(dotenv_path='../.env')
+    load_dotenv(dotenv_path='../.env')  # Correct path from tests directory
     
     slack_url = os.getenv("SLACK_WEBHOOK_URL")
     openai_key = os.getenv("OPENAI_API_KEY")
