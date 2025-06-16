@@ -154,6 +154,56 @@ class TwitterScraperNew:
             
         return tweets
 
+    def parse_alternative_timeline(self, data: Dict) -> List[Dict]:
+        """Alternative parsing method for different X.com API structures"""
+        tweets = []
+        try:
+            # Try different JSON structures
+            possible_paths = [
+                "data.user.result.timeline.timeline.instructions",
+                "data.home.home_timeline_urt.instructions", 
+                "data.timeline.timeline.instructions",
+                "timeline.instructions",
+                "instructions"
+            ]
+            
+            instructions = None
+            for path in possible_paths:
+                instructions = jmespath.search(path, data)
+                if instructions:
+                    logger.debug(f"Found instructions at path: {path}")
+                    break
+            
+            if not instructions:
+                return tweets
+            
+            for instruction in instructions:
+                if instruction.get("type") in ["TimelineAddEntries", "TimelineReplaceEntry"]:
+                    entries = instruction.get("entries", [])
+                    for entry in entries:
+                        entry_id = entry.get("entryId", "")
+                        if any(pattern in entry_id for pattern in ["tweet-", "homeConversation-", "profile-conversation-"]):
+                            # Try multiple tweet data paths
+                            tweet_paths = [
+                                "content.itemContent.tweet_results.result",
+                                "content.itemContent.result", 
+                                "content.item.content.result",
+                                "item.content.result"
+                            ]
+                            
+                            for path in tweet_paths:
+                                tweet_data = jmespath.search(path, entry)
+                                if tweet_data and "legacy" in tweet_data:
+                                    parsed_tweet = self.parse_tweet(tweet_data)
+                                    if parsed_tweet:
+                                        tweets.append(parsed_tweet)
+                                        break
+                                        
+        except Exception as e:
+            logger.debug(f"Error in alternative parsing: {e}")
+            
+        return tweets
+
     async def scrape_user_timeline_scrapfly(self, username: str, max_tweets: int = 10) -> List[Dict]:
         """Scrape user timeline using Scrapfly (more reliable)"""
         if not SCRAPFLY_AVAILABLE:
@@ -175,28 +225,80 @@ class TwitterScraperNew:
             result = await scrapfly.async_scrape(ScrapeConfig(
                 url,
                 render_js=True,  # Enable headless browser
-                wait_for_selector="[data-testid='tweet']",  # Wait for tweets to load
+                wait_for_selector="[data-testid='tweet']",  # Wait for tweets specifically
                 cache=False,  # Don't use cache for fresh data
                 country="US",  # Use US proxy
-                proxy_pool="public_residential_pool"  # Use residential proxies
+                proxy_pool="public_residential_pool",  # Use residential proxies
+                asp=True,  # Enable ASP for better success rate
+                rendering_wait=2000,  # Reduced wait time
+                js_scenario=[  # Simplified scrolling
+                    {"wait": 1000},
+                    {"scroll": {"y": 1000}},
+                    {"wait": 1000},
+                    {"scroll": {"y": 2000}},
+                    {"wait": 1000}
+                ]
             ))
             
+            logger.info(f"Scrapfly response status: {result.response.status_code}")
+            
+            # Check if we got blocked or redirected
+            if result.response.status_code != 200:
+                logger.warning(f"Scrapfly returned status {result.response.status_code}, falling back to Playwright")
+                return await self.scrape_user_timeline_playwright(username, max_tweets)
+            
             # Extract XHR calls from browser data
-            xhr_calls = result.scrape_result.get("browser_data", {}).get("xhr_call", [])
+            browser_data = result.scrape_result.get("browser_data", {})
+            xhr_calls = browser_data.get("xhr_call", [])
+            
+            logger.info(f"Found {len(xhr_calls)} XHR calls from Scrapfly")
+            
+            # Debug: Log all XHR URLs to see what we're getting
+            if logger.getEffectiveLevel() <= 10:  # DEBUG level
+                for i, xhr in enumerate(xhr_calls[:10]):  # Log first 10
+                    url = xhr.get("url", "No URL")
+                    logger.debug(f"XHR {i+1}: {url}")
             
             tweets = []
             for xhr in xhr_calls:
-                if xhr.get("url") and ("UserTweets" in xhr["url"] or "UserMedia" in xhr["url"]):
+                url_check = xhr.get("url", "")
+                # Expanded patterns for different X.com API endpoints
+                api_patterns = [
+                    "UserTweets", "UserBy", "UserMedia", 
+                    "Timeline", "HomeTimeline", "HomeLatest",
+                    "usertweets", "profile", "status",
+                    "graphql", "adaptive.json", "timeline.json"
+                ]
+                
+                if url_check and any(pattern in url_check for pattern in api_patterns):
+                    logger.debug(f"Found matching XHR URL: {url_check[:100]}...")
                     try:
-                        if xhr.get("response", {}).get("body"):
-                            response_data = json.loads(xhr["response"]["body"])
+                        response_body = xhr.get("response", {}).get("body")
+                        if response_body:
+                            response_data = json.loads(response_body)
                             parsed_tweets = self.parse_user_timeline_tweets(response_data)
-                            tweets.extend(parsed_tweets)
-                            if len(tweets) >= max_tweets:
+                            if parsed_tweets:
+                                tweets.extend(parsed_tweets)
+                                logger.debug(f"Parsed {len(parsed_tweets)} tweets from XHR call")
+                            else:
+                                # Try alternative parsing methods
+                                alt_tweets = self.parse_alternative_timeline(response_data)
+                                if alt_tweets:
+                                    tweets.extend(alt_tweets)
+                                    logger.debug(f"Parsed {len(alt_tweets)} tweets using alternative method")
+                            
+                            if len(tweets) >= max_tweets * 2:  # Get extra to filter
                                 break
                     except Exception as e:
                         logger.debug(f"Could not parse Scrapfly XHR response: {e}")
                         continue
+            
+            # If no XHR data, try parsing the HTML directly
+            if not tweets:
+                logger.warning(f"No XHR data found for @{username}, trying HTML parsing")
+                # Fallback to basic HTML parsing would go here
+                # For now, fall back to Playwright
+                return await self.scrape_user_timeline_playwright(username, max_tweets)
             
             # Remove duplicates based on tweet ID
             seen_ids = set()
@@ -272,26 +374,32 @@ class TwitterScraperNew:
         """Main method to scrape user timeline - tries Scrapfly first, falls back to Playwright"""
         return await self.scrape_user_timeline_scrapfly(username, max_tweets)
 
-    def is_tweet_from_yesterday(self, tweet: Dict) -> bool:
-        """Check if tweet is from yesterday (previous 24 hours)"""
+    def is_tweet_recent(self, tweet: Dict) -> bool:
+        """Check if tweet is from the last 120 hours (5 days for weekend coverage)"""
         try:
             created_at = tweet.get("created_at")
             if not created_at:
+                logger.debug("Tweet has no created_at field")
                 return False
             
             # Parse Twitter's date format: "Wed Oct 10 20:19:24 +0000 2018"
             tweet_date = datetime.strptime(created_at, "%a %b %d %H:%M:%S %z %Y")
             
-            # Get yesterday's date range in UTC
+            # Get current time and cutoff (last 120 hours for better weekend coverage)
             utc = timezone.utc
             now = datetime.now(utc)
-            yesterday_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            yesterday_end = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
+            cutoff_time = now - timedelta(hours=120)  # 5 days to account for weekends
             
-            return yesterday_start <= tweet_date <= yesterday_end
+            is_recent = tweet_date >= cutoff_time
+            
+            # Enhanced logging for debugging
+            hours_ago = (now - tweet_date).total_seconds() / 3600
+            logger.debug(f"Tweet from @{tweet.get('user', {}).get('username', 'unknown')}: {hours_ago:.1f}h ago, Recent: {is_recent}")
+            
+            return is_recent
             
         except Exception as e:
-            logger.error(f"Error parsing tweet date: {e}")
+            logger.error(f"Error parsing tweet date '{created_at}': {e}")
             return False
 
     def format_tweet_for_summary(self, tweet: Dict, username: str) -> str:
@@ -310,49 +418,111 @@ class TwitterScraperNew:
         
         return f"@{username}: {text}{engagement_info}"
     async def scrape_all_accounts(self) -> List[str]:
-        """Scrape tweets from all configured accounts"""
+        """Scrape tweets from all configured accounts with dynamic rate limiting"""
         all_tweets = []
         successful_accounts = 0
         
-        for username in X_ACCOUNTS:
+        # Dynamic rate limiting variables
+        base_delay = 1.0  # Start with 1 second
+        max_delay = 10.0  # Maximum delay
+        success_streak = 0
+        
+        for i, username in enumerate(X_ACCOUNTS):
             try:
-                logger.info(f"Processing @{username}...")
+                logger.info(f"Processing @{username} ({i+1}/{len(X_ACCOUNTS)})...")
+                
+                # Scrape tweets
                 tweets = await self.scrape_user_timeline(username, max_tweets=20)
+                logger.info(f"Raw tweets found for @{username}: {len(tweets)}")
                 
-                # Filter to yesterday's tweets
-                yesterday_tweets = [t for t in tweets if self.is_tweet_from_yesterday(t)]
+                # Debug: Log some sample tweet dates
+                if tweets:
+                    for j, tweet in enumerate(tweets[:3]):
+                        created_at = tweet.get("created_at", "No date")
+                        text_preview = tweet.get("text", "No text")[:50]
+                        logger.debug(f"Sample tweet {j+1}: {created_at} - {text_preview}...")
                 
-                if yesterday_tweets:
-                    for tweet in yesterday_tweets[:5]:  # Limit to 5 tweets per account
+                # Filter to recent tweets (last 48 hours)
+                recent_tweets = [t for t in tweets if self.is_tweet_recent(t)]
+                
+                if recent_tweets:
+                    for tweet in recent_tweets[:5]:  # Limit to 5 tweets per account
                         formatted_tweet = self.format_tweet_for_summary(tweet, username)
                         all_tweets.append(formatted_tweet)
                     
-                    logger.info(f"Found {len(yesterday_tweets)} relevant tweets from @{username}")
+                    logger.info(f"Found {len(recent_tweets)} recent tweets from @{username}")
                     successful_accounts += 1
+                    success_streak += 1
+                    
+                    # Decrease delay on success
+                    base_delay = max(0.5, base_delay * 0.8)
                 else:
-                    logger.info(f"No yesterday tweets found for @{username}")
+                    logger.warning(f"No recent tweets found for @{username} (found {len(tweets)} total tweets)")
+                    success_streak = 0
+                    
+                    # Increase delay on no results (might be getting blocked)
+                    base_delay = min(max_delay, base_delay * 1.5)
                 
-                # Rate limiting
-                await asyncio.sleep(2)
+                # Dynamic rate limiting based on success
+                if i < len(X_ACCOUNTS) - 1:  # Don't delay after last account
+                    if success_streak >= 3:
+                        # Good streak - use minimal delay
+                        delay = max(0.5, base_delay)
+                    elif successful_accounts == 0 and i >= 2:
+                        # No success yet - increase delay significantly
+                        delay = min(max_delay, base_delay * 2)
+                    else:
+                        delay = base_delay
+                    
+                    logger.debug(f"Rate limiting: waiting {delay:.1f}s (base: {base_delay:.1f}s, streak: {success_streak})")
+                    await asyncio.sleep(delay)
                 
             except Exception as e:
                 logger.error(f"Failed to process @{username}: {e}")
+                success_streak = 0
+                base_delay = min(max_delay, base_delay * 1.2)
                 continue
         
         logger.info(f"Successfully processed {successful_accounts}/{len(X_ACCOUNTS)} accounts")
         logger.info(f"Total tweets collected: {len(all_tweets)}")
+        
+        # Log current time for debugging
+        utc = timezone.utc
+        current_time = datetime.now(utc)
+        logger.info(f"Scraping completed at: {current_time} UTC")
+        logger.info(f"Looking for tweets from last 120 hours (since {current_time - timedelta(hours=120)})")
+        
+        # Enhanced debugging
+        if successful_accounts == 0:
+            logger.error("🚨 CRITICAL: No accounts were successfully scraped!")
+            logger.error("This suggests either:")
+            logger.error("1. Scrapfly API issues or rate limits")
+            logger.error("2. X.com has updated their structure")
+            logger.error("3. All accounts genuinely have no recent posts (very unlikely)")
+        elif len(all_tweets) == 0:
+            logger.warning("⚠️  Scraping succeeded but no recent tweets found")
+            logger.warning("This might indicate:")
+            logger.warning("1. Date filtering is too restrictive")
+            logger.warning("2. Tweet parsing is failing")
+            logger.warning("3. Genuinely quiet period (unlikely for all AI companies)")
         
         return all_tweets
 
     def generate_summary(self, tweets: List[str]) -> str:
         """Generate AI summary of tweets"""
         if not tweets:
-            return "No tweets found from monitored AI companies in the last 24 hours."
+            return "No tweets found from monitored AI companies in the last 5 days."
         
         # Combine tweets for analysis
         tweets_text = "\n\n".join(tweets[:25])  # Limit to prevent token overflow
         
-        prompt = f"""Analyze these tweets from AI companies and create a concise daily summary:
+        # Get current time for context
+        utc = timezone.utc
+        current_time = datetime.now(utc)
+        
+        prompt = f"""Analyze these tweets from AI companies posted in the last 5 days and create a concise business week summary:
+
+Current time: {current_time.strftime('%Y-%m-%d %H:%M UTC')}
 
 Key points to extract:
 - New product announcements
@@ -361,10 +531,11 @@ Key points to extract:
 - Notable research findings
 - Significant company updates
 - Industry trends and insights
+- Major business developments
 
-Please format the summary in clear bullet points with the most important information first.
+Please format the summary as a professional business intelligence briefing with clear bullet points, prioritizing the most important information first. Focus on developments that would impact the AI industry or business strategy.
 
-Tweets from the last 24 hours:
+Tweets from the last 5 business days:
 {tweets_text}
 
 Summary:"""
@@ -426,8 +597,12 @@ Summary:"""
             logger.error("SLACK_WEBHOOK_URL not set")
             return False
 
+        # Determine day of week for appropriate title
+        current_time = datetime.now(timezone.utc)
+        day_name = current_time.strftime('%A')
+        
         payload = {
-            "text": f"*📰 Daily AI Summary - {datetime.now().strftime('%Y-%m-%d')}*\n\n{message}",
+            "text": f"*📰 AI Business Week Summary - {day_name}, {current_time.strftime('%Y-%m-%d')}*\n\n{message}",
             "mrkdwn": True
         }
 
@@ -478,9 +653,24 @@ async def main():
             # Generate summary
             if tweets:
                 summary = scraper.generate_summary(tweets)
-                message = f"{summary}\n\n_Scraped {len(tweets)} tweets from {len(X_ACCOUNTS)} AI companies_"
+                message = f"{summary}\n\n_Scraped {len(tweets)} tweets from {len(X_ACCOUNTS)} AI companies (last 5 days)_"
             else:
-                message = "No tweets found from monitored AI companies in the last 24 hours. All accounts were checked but no recent activity was detected."            
+                # More detailed failure message
+                utc = timezone.utc
+                current_time = datetime.now(utc)
+                message = f"⚠️ **No Recent Tweets Found** - {current_time.strftime('%Y-%m-%d %H:%M UTC')}\n\n" \
+                         f"The scraper checked all monitored AI companies but found no tweets from the last 5 days.\n\n" \
+                         f"**Debug Info:**\n" \
+                         f"- Checked: {', '.join(X_ACCOUNTS)}\n" \
+                         f"- Time range: Last 120 hours from {current_time.strftime('%Y-%m-%d %H:%M UTC')}\n" \
+                         f"- Scrapfly available: {'Yes' if SCRAPFLY_AVAILABLE else 'No'}\n" \
+                         f"- Scrapfly key configured: {'Yes' if os.getenv('SCRAPFLY_API_KEY') else 'No'}\n" \
+                         f"- Playwright available: {'Yes' if PLAYWRIGHT_AVAILABLE else 'No'}\n\n" \
+                         f"**Possible causes:**\n" \
+                         f"• Very quiet period across all companies (highly unlikely)\n" \
+                         f"• X.com blocking or rate limiting our scraper\n" \
+                         f"• Technical issues with scraping methods\n\n" \
+                         f"The system will retry on the next scheduled run."            
             # Send to Slack
             if scraper.send_to_slack(message):
                 logger.info("Successfully sent daily summary to Slack")
