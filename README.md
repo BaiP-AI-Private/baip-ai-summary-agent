@@ -20,6 +20,20 @@ This project automatically monitors major AI companies on X (Twitter), analyzes 
 - **Dynamic Rate Limiting** - Adaptive delays based on success/failure patterns
 - **Comprehensive Error Handling** - Graceful degradation and detailed diagnostics
 
+### **Reliability Flow:**
+```
+Free Scrapfly → Playwright Fallback → Manual Summary
+     ↓              ↓                    ↓
+   Reliable      Semi-reliable       Always works
+   (Primary)      (Backup)           (Final)
+```
+
+**How it works:**
+1. **Scrapfly First** - Uses professional scraping service (free tier: ~1000 requests/month)
+2. **Playwright Backup** - Falls back to direct browser automation if Scrapfly fails
+3. **Manual Summary** - Generates business intelligence even if no tweets found
+4. **Always Delivers** - Your Slack channel gets reports regardless of technical issues
+
 ### **Data Processing:**
 - **Advanced JSON Parsing** - Extracts structured data from X.com's internal APIs
 - **Date Intelligence** - 5-day lookback window with timezone awareness
