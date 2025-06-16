@@ -1,4 +1,4 @@
-name: Daily AI Summary - Fallback
+name: AI Summary - Fallback
 
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
         webhook_url = os.getenv('SLACK_WEBHOOK_URL')
         if webhook_url:
             payload = {
-                'text': f'*📰 Daily AI Summary - Fallback Mode - {datetime.now().strftime(\"%Y-%m-%d\")}*\n\nThe main Twitter scraper encountered issues. This is a fallback notification.\n\nMonitored accounts: OpenAI, xAI, AnthropicAI, GoogleDeepMind, MistralAI, AIatMeta, Cohere, perplexity_ai, scale_ai, runwayml, dair_ai\n\n_Please check the main workflow logs for details._',
+                'text': f'*📰 AI Summary - Fallback Mode - {datetime.now().strftime(\"%Y-%m-%d\")}*\n\nThe main Twitter scraper encountered issues during the business week scan. This is a fallback notification.\n\nMonitored accounts: OpenAI, xAI, AnthropicAI, GoogleDeepMind, MistralAI, AIatMeta, Cohere, perplexity_ai, scale_ai, runwayml, dair_ai\n\n**Schedule**: Business week monitoring (Tue-Sat, 2:00 AM UTC)\n**Coverage**: Last 5 days of AI company activity\n\n_Please check the main workflow logs for details._',
                 'mrkdwn': True
             }
             response = requests.post(webhook_url, json=payload)
