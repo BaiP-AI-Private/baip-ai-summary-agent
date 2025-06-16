@@ -26,7 +26,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('../tweet_scraper.log'),
+        logging.FileHandler('tweet_scraper.log'),
         logging.StreamHandler()
     ]
 )

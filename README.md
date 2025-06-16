@@ -8,18 +8,20 @@ Powered by multiple scraping approaches and AI-generated summaries, the system a
 
 ```
 ai-summary-agent/
-├── .env                          # Environment variables (not in git)
-├── .env.example                  # Environment template
-├── .gitignore                    # Git ignore rules
-├── README.md                     # This file
-├── requirements.txt              # Python dependencies
-├── TWITTER_SCRAPER_SUMMARY.md   # Implementation overview
-├── .github/                     # GitHub Actions workflows
+├── .env                                 # Environment variables (not in git)
+├── .env.example                         # Environment template
+├── .gitignore                           # Git ignore rules
+├── README.md                            # This file
+├── requirements.txt                     # Python dependencies
+├── docs/
+│   ├── TWITTER_SCRAPER.md               # Implementation overview
+│   └── SCRAPFLY_INTEGRATION.md          # Integrate Scrapfy
+├── .github/                             # GitHub Actions workflows
 │   ├── workflows/
-│   │   ├── daily-summary.yml    # Main automated workflow
-│   │   └── fallback-summary.yml # Backup notification workflow
-│   └── WORKFLOW_UPDATES.md      # Workflow documentation
-└── scripts/                     # All scripts and utilities
+│   │   ├── daily-summary.yml            # Main automated workflow
+│   │   └── fallback-summary.yml         # Backup notification workflow
+│   └── WORKFLOW_UPDATES.md              # Workflow documentation
+└── scripts/                             # All scripts and utilities
     ├── twitter_scraper_scrapfly.py      # 🎯 Modern Playwright-based scraper
     ├── twitter_scraper_nitter.py        # 🔄 Nitter-based scraper (legacy)
     ├── twitter_scraper_fallback.py      # 🆘 Minimal fallback scraper
@@ -65,8 +67,8 @@ ai-summary-agent/
 
 ### 1. Clone and Setup
 ```bash
-git clone <repository-url>
-cd ai-summary-agent
+git clone https://github.com/BaiP-AI-Private/baip-ai-summary-agent.git
+cd baip-ai-summary-agent
 pip install -r requirements.txt
 ```
 
