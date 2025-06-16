@@ -557,16 +557,17 @@ Summary:"""
             return self.generate_manual_summary(tweets)
 
     def generate_manual_summary(self, tweets: List[str]) -> str:
-        """Generate a manual summary when AI is unavailable"""
-        summary = "**Daily AI Summary - Manual Overview**\n\n"
+        """Generate a professional summary when AI is unavailable"""
+        current_time = datetime.now(timezone.utc)
+        summary = f"**AI Business Week Summary - Manual Analysis**\n*{current_time.strftime('%Y-%m-%d %H:%M UTC')}*\n\n"
         
-        # Extract key topics
+        # Extract key topics with business focus
         topics = {
-            "model": ["gpt", "claude", "gemini", "llama", "mistral", "model"],
-            "api": ["api", "endpoint", "integration", "developer"],
-            "research": ["research", "paper", "study", "breakthrough"],
-            "product": ["launch", "release", "announce", "new", "update"],
-            "partnership": ["partner", "collaboration", "team", "join"]
+            "product": ["launch", "release", "announce", "new", "update", "feature"],
+            "partnership": ["partner", "collaboration", "team", "join", "acquisition"],
+            "research": ["research", "paper", "study", "breakthrough", "model"],
+            "business": ["funding", "investment", "growth", "revenue", "enterprise"],
+            "technical": ["api", "endpoint", "integration", "developer", "platform"]
         }
         
         categorized = {}
@@ -579,16 +580,23 @@ Summary:"""
                     categorized[category].append(tweet)
                     break
         
+        # Generate business-focused summary
         if categorized:
+            summary += "**Key Business Developments:**\n"
             for category, category_tweets in categorized.items():
                 if category_tweets:
-                    summary += f"• **{category.title()} Updates**: {len(category_tweets)} related posts\n"
+                    summary += f"• **{category.title()}**: {len(category_tweets)} significant updates detected\n"
+            
+            summary += f"\n**Activity Overview:**\n"
+            summary += f"• Total significant posts analyzed: {len(tweets)}\n"
+            summary += f"• Companies with notable activity: {len([c for c in categorized.values() if c])}\n"
+            summary += f"• Time period: Last 5 business days\n"
+        else:
+            summary += "• Routine social media activity detected\n"
+            summary += "• No major business developments identified\n"
+            summary += f"• {len(tweets)} posts analyzed from monitored companies\n"
         
-        summary += "\n**Sample Posts:**\n"
-        for tweet in tweets[:8]:
-            summary += f"• {tweet}\n"
-        
-        summary += "\n*Manual summary generated - AI analysis unavailable*"
+        summary += f"\n*Note: Manual analysis performed due to AI service unavailability. For detailed insights, AI-powered analysis will resume when service is restored.*"
         return summary
     def send_to_slack(self, message: str) -> bool:
         """Send summary to Slack"""

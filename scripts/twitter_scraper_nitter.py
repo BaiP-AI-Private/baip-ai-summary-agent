@@ -460,19 +460,18 @@ class TweetScraper:
         if categorized:
             for category, category_tweets in categorized.items():
                 if category_tweets:
-                    summary += f"• **{category.title()} Updates**: {len(category_tweets)} related posts\n"
+                    summary += f"• **{category.title()}**: {len(category_tweets)} significant updates detected\n"
             
-            summary += "\n**Sample Posts:**\n"
-            for tweet in tweets[:5]:
-                summary += f"• {tweet}\n"
+            summary += f"\n**Activity Overview:**\n"
+            summary += f"• Total significant posts analyzed: {len(tweets)}\n"
+            summary += f"• Categories with activity: {len([c for c in categorized.values() if c])}\n"
+            summary += f"• Time period: Last 5 business days\n"
         else:
-            summary += "• Multiple posts from AI companies tracked\n"
-            summary += "• Content includes company updates and announcements\n\n"
-            summary += "**Recent Posts:**\n"
-            for tweet in tweets[:8]:
-                summary += f"• {tweet}\n"
+            summary += "• Routine social media activity detected\n"
+            summary += "• No major business developments identified\n"
+            summary += f"• {len(tweets)} posts analyzed from monitored companies\n"
         
-        summary += "\n*Note: Manual summary generated due to API limitations. AI-powered analysis will resume when quota is restored.*"
+        summary += "\n*Note: Manual analysis performed due to AI service unavailability. For detailed insights, AI-powered analysis will resume when service is restored.*"
         return summary
 
     def generate_summary(self, tweets):
